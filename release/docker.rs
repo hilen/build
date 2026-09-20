@@ -26,6 +26,11 @@ pub fn run_in(app: &str, image: &str, platform: &str, lane: &str, stage: &str, s
         String::new()
     };
     let arch = platform.replace('/', "-");
+    // The app embeds its Sentry DSN with option_env! at compile time, and the
+    // compiler runs in the container. Only the name goes on the command line,
+    // docker copies the value from the host env, so no log shows it. Unset on
+    // the host means unset in the container.
+    let sentry = format!("{}_SENTRY_URL", app.to_uppercase().replace('-', "_"));
     // The container runs as root. On a Linux host the staged files would stay
     // root owned, and the next run or the runner cleanup could not touch them.
     let uid = capture("id -u")?;
@@ -39,6 +44,7 @@ pub fn run_in(app: &str, image: &str, platform: &str, lane: &str, stage: &str, s
   -v {lane}-{arch}-cargo-git:/usr/local/cargo/git \
   -v {lane}-{arch}-rustup:/usr/local/rustup \
   -e CARGO_TARGET_DIR=/work/apps/app/target/{lane} \
+  -e {sentry} \
   {image} bash -c 'trap "chown -R {uid}:{gid} /work/apps/app/target/{stage}" EXIT; {script}'"#
     ))
 }
