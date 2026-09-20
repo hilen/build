@@ -7,17 +7,23 @@ use std::process::{Command, Stdio};
 use anyhow::{Result, bail};
 
 /// The shell that runs a command string, cmd on Windows and sh elsewhere.
+#[cfg(not(windows))]
 fn shell(cmd: &str) -> Command {
-    let mut c = if cfg!(windows) {
-        let mut c = Command::new("cmd");
-        c.arg("/C");
-        c
-    } else {
-        let mut c = Command::new("sh");
-        c.arg("-c");
-        c
-    };
-    c.arg(cmd);
+    let mut c = Command::new("sh");
+    c.arg("-c").arg(cmd);
+    c
+}
+
+/// cmd does not read the `\"` that `arg` writes for a quote inside an argument,
+/// so `git commit -m "release v1.2.3"` reached git as 2 broken words. The
+/// string goes in untouched. With `/S` cmd strips only the outer pair of
+/// quotes, so a command that itself starts with a quote survives too.
+#[cfg(windows)]
+fn shell(cmd: &str) -> Command {
+    use std::os::windows::process::CommandExt;
+
+    let mut c = Command::new("cmd");
+    c.arg("/S").arg("/C").raw_arg(format!("\"{cmd}\""));
     c
 }
 
@@ -83,4 +89,19 @@ pub fn run_quiet(cmd: &str) -> Result<String> {
         bail!("command failed: {cmd}");
     }
     Ok(text)
+}
+
+#[cfg(test)]
+mod tests {
+    use anyhow::Result;
+
+    use super::capture;
+
+    // On Windows the inner quotes used to reach git escaped, as 2 words.
+    #[test]
+    fn a_quoted_argument_stays_one_argument() -> Result<()> {
+        let out = capture(r#"git rev-parse --sq-quote "two words""#)?;
+        assert_eq!(out, "'two words'");
+        Ok(())
+    }
 }
