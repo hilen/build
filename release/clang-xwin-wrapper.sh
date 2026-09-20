@@ -4,8 +4,16 @@
 # `/imsvc <PATH>` pairs which gcc-mode clang doesn't understand. Translate
 # those pairs to plain `-I <PATH>` so the same CFLAGS work in both modes.
 #
-# Installed as `/usr/local/bin/clang` so it shadows `/usr/bin/clang` on PATH
-# (clang-cl is invoked via cargo-xwin's own symlink, which is untouched).
+# Installed as `/usr/local/bin/clang` so it shadows `/usr/bin/clang` on PATH.
+#
+# cargo-xwin makes its `clang-cl` a symlink to the first clang on PATH, which is
+# this file. A plain exec of clang would drop cl mode, and an MSVC flag such as
+# `/FI<file>` is then read as an input file. aws-lc-sys fails on exactly that.
+# So a call under the name clang-cl keeps cl mode and its arguments as they are.
+if [ "$(basename "$0")" = "clang-cl" ]; then
+  exec /usr/lib/llvm-14/bin/clang --driver-mode=cl "$@"
+fi
+
 args=()
 while [ $# -gt 0 ]; do
   case "$1" in
