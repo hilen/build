@@ -29,7 +29,7 @@ fi
 TOKEN=$(curl -sSf -X POST "$INFISICAL_URL/api/v1/auth/universal-auth/login" \
     -H "Content-Type: application/json" \
     -d "{\"clientId\":\"$INFISICAL_MACHINE_IDENTITY_CLIENT_ID\",\"clientSecret\":\"$INFISICAL_MACHINE_IDENTITY_CLIENT_SECRET\"}" \
-    | python3 -c "import sys,json;print(json.load(sys.stdin)['accessToken'])")
+    | jq -er .accessToken)
 
 cmd=("$@")
 for ((i=${#projects[@]}-1; i>=0; i--)); do

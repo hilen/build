@@ -25,6 +25,7 @@ fn main() -> Result<()> {
         bail!("usage: sign.rs <artifact> [<artifact> ...]");
     }
     let key = signing_key(&release.name)?;
+    check_public_key(&key)?;
     for file in files {
         let bytes = std::fs::read(&file).with_context(|| format!("read {file}"))?;
         let meta = Meta {
@@ -35,6 +36,20 @@ fn main() -> Result<()> {
         let out = format!("{file}.meta.json");
         std::fs::write(&out, serde_json::to_string_pretty(&meta)?)?;
         println!("signed {file} -> {out}");
+    }
+    Ok(())
+}
+
+// A wrong secret would ship updates that no installed app accepts. An app that
+// keeps its public key in assets/update-key.pub gets the secret checked against it.
+fn check_public_key(key: &SigningKey) -> Result<()> {
+    let path = "assets/update-key.pub";
+    let Ok(public) = std::fs::read_to_string(path) else {
+        println!("no {path}, the signing key is not checked against the app");
+        return Ok(());
+    };
+    if hex::encode(key.verifying_key().as_bytes()) != public.trim() {
+        bail!("the signing key does not match {path}, the public key embedded in the app");
     }
     Ok(())
 }

@@ -43,14 +43,22 @@ pub fn run_allow_fail(cmd: &str) {
 /// never reaches the log.
 pub fn capture(cmd: &str) -> Result<String> {
     println!("{cmd}");
-    let out = shell(cmd)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .output()?;
+    let out = shell(cmd).stdout(Stdio::piped()).stderr(Stdio::inherit()).output()?;
     if !out.status.success() {
         bail!("command failed: {cmd}");
     }
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// Run a command that reads a secret from the environment. The command is not
+/// echoed, so write the secret as a shell variable like `$TOKEN`, never as its
+/// value.
+pub fn run_secret(cmd: &str) -> Result<()> {
+    let status = shell(cmd).status()?;
+    if !status.success() {
+        bail!("credentialed command failed with {status}");
+    }
+    Ok(())
 }
 
 /// Capture stdout and stderr together and never fail, for probing commands whose

@@ -1,11 +1,21 @@
-//! What the desktop release scripts need, the package name and version from
-//! Cargo.toml and the `[release]` table of hilen.toml.
+//! What the desktop release scripts need. The package comes from project_name
+//! in hilen.toml, its version and binary name from cargo metadata, the rest
+//! from the `[release]` table of hilen.toml. Asking cargo keeps this right for
+//! a workspace, where the version sits in `[workspace.package]` and the window
+//! app binary can carry another name than its package.
 
-use anyhow::{Context, Result};
+use std::fs::read_to_string;
+
+use anyhow::{Context, Result, bail};
+use serde::Deserialize;
+
+use crate::{config, run::capture};
 
 pub struct Release {
     /// cargo package name, the artifact file name prefix
     pub name: String,
+    /// the binary target of that package, the file name cargo builds
+    pub bin: String,
     pub version: String,
     pub bundle_id: String,
     /// where the binaries are served, no trailing slash
@@ -23,33 +33,82 @@ impl Release {
     }
 }
 
-/// Read from the repo root, before any chdir.
-pub fn read() -> Result<Release> {
-    let cargo = std::fs::read_to_string("Cargo.toml").context("Cargo.toml not found")?;
-    let cargo: serde_json::Value = toml::from_str(&cargo)?;
-    let package = cargo.get("package").context("[package] missing in Cargo.toml")?;
-    let name = string(package, "name")?;
-    let version = string(package, "version")?;
-
-    let hilen = std::fs::read_to_string("hilen.toml").context("hilen.toml not found")?;
-    let hilen: serde_json::Value = toml::from_str(&hilen)?;
-    let bundle_id = string(&hilen, "bundle_id")?;
-    let release = hilen.get("release").context("[release] missing in hilen.toml")?;
-
-    Ok(Release {
-        name,
-        version,
-        bundle_id,
-        download_url: string(release, "download_url")?.trim_end_matches('/').to_string(),
-        host_deployment: string(release, "host_deployment")?,
-        target_subdir: string(release, "target_subdir")?,
-    })
+#[derive(Deserialize)]
+struct Hilen {
+    release: Distribution,
 }
 
-fn string(value: &serde_json::Value, key: &str) -> Result<String> {
-    Ok(value
-        .get(key)
-        .and_then(|v| v.as_str())
-        .with_context(|| format!("{key} missing"))?
-        .to_string())
+#[derive(Deserialize)]
+struct Distribution {
+    download_url: String,
+    host_deployment: String,
+    target_subdir: String,
+}
+
+#[derive(Deserialize)]
+struct Metadata {
+    packages: Vec<Package>,
+}
+
+#[derive(Deserialize)]
+struct Package {
+    name: String,
+    version: String,
+    targets: Vec<Target>,
+}
+
+#[derive(Deserialize)]
+struct Target {
+    name: String,
+    kind: Vec<String>,
+}
+
+/// Read from the repo root, before any chdir.
+pub fn read() -> Result<Release> {
+    let config = config::read()?;
+    let hilen: Hilen =
+        toml::from_str(&read_to_string("hilen.toml")?).context("[release] table in hilen.toml")?;
+
+    let metadata: Metadata = serde_json::from_str(&capture("cargo metadata --no-deps --format-version 1")?)?;
+    let package = metadata
+        .packages
+        .into_iter()
+        .find(|p| p.name == config.app_name)
+        .with_context(|| {
+            format!(
+                "no cargo package named {}, the project_name of hilen.toml",
+                config.app_name
+            )
+        })?;
+    let bins: Vec<String> = package
+        .targets
+        .into_iter()
+        .filter(|t| t.kind.iter().any(|k| k == "bin"))
+        .map(|t| t.name)
+        .collect();
+    // A binary named like the package is the app, side binaries such as a
+    // gallery are ignored. A lone binary under another name is the app too,
+    // a workspace needs that when another crate owns the package name.
+    let bin = if bins.contains(&package.name) {
+        package.name.clone()
+    } else if bins.len() == 1 {
+        bins[0].clone()
+    } else {
+        bail!(
+            "cannot pick the binary of package {} to release, it has {}: {}",
+            package.name,
+            bins.len(),
+            bins.join(", ")
+        );
+    };
+
+    Ok(Release {
+        name: package.name,
+        bin,
+        version: package.version,
+        bundle_id: config.bundle_id,
+        download_url: hilen.release.download_url.trim_end_matches('/').to_string(),
+        host_deployment: hilen.release.host_deployment,
+        target_subdir: hilen.release.target_subdir,
+    })
 }

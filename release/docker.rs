@@ -5,7 +5,7 @@
 //! resolves inside the container the same way it does outside.
 
 use anyhow::Result;
-use shared::run::run;
+use shared::run::{capture, run};
 
 pub fn build_image(name: &str, dockerfile: &str, platform: &str) -> Result<()> {
     run(&format!(
@@ -13,7 +13,10 @@ pub fn build_image(name: &str, dockerfile: &str, platform: &str) -> Result<()> {
     ))
 }
 
-pub fn run_in(image: &str, platform: &str, lane: &str, script: &str) -> Result<()> {
+/// `stage` is the folder under target/ that the script writes for the host to
+/// read back. The download caches are shared by every app on the box, the
+/// target volume carries the app name so two apps never build into one folder.
+pub fn run_in(app: &str, image: &str, platform: &str, lane: &str, stage: &str, script: &str) -> Result<()> {
     let cwd = std::env::current_dir()?;
     let cwd = cwd.display();
     let engine = std::path::Path::new("../../hilen");
@@ -23,15 +26,19 @@ pub fn run_in(image: &str, platform: &str, lane: &str, script: &str) -> Result<(
         String::new()
     };
     let arch = platform.replace('/', "-");
+    // The container runs as root. On a Linux host the staged files would stay
+    // root owned, and the next run or the runner cleanup could not touch them.
+    let uid = capture("id -u")?;
+    let gid = capture("id -g")?;
     run(&format!(
         r#"docker run --rm --platform {platform} \
-  -v {cwd}:/work/apps/app \
+  -v "{cwd}:/work/apps/app" \
   {engine_mount} \
-  -v {lane}-{arch}-target:/work/apps/app/target/{lane} \
+  -v {app}-{lane}-{arch}-target:/work/apps/app/target/{lane} \
   -v {lane}-{arch}-cargo-registry:/usr/local/cargo/registry \
   -v {lane}-{arch}-cargo-git:/usr/local/cargo/git \
   -v {lane}-{arch}-rustup:/usr/local/rustup \
   -e CARGO_TARGET_DIR=/work/apps/app/target/{lane} \
-  {image} bash -c '{script}'"#
+  {image} bash -c 'trap "chown -R {uid}:{gid} /work/apps/app/target/{stage}" EXIT; {script}'"#
     ))
 }

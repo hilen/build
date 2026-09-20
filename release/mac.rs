@@ -10,13 +10,15 @@
 
 use anyhow::{Context, Result, bail};
 use shared::release::{self, Release};
-use shared::run::{capture, run};
+use shared::run::{capture, run, run_secret};
 
 const TARGETS: [&str; 2] = ["aarch64-apple-darwin", "x86_64-apple-darwin"];
 
 fn main() -> Result<()> {
     let r = release::read()?;
     std::fs::create_dir_all("dist")?;
+    // lipo writes here, and a fresh checkout that only built with --target has no such folder yet.
+    std::fs::create_dir_all("target/release")?;
     let signing = std::env::var("APPLE_SIGNING_IDENTITY").ok().filter(|s| !s.is_empty());
     if signing.is_none() && std::env::var("CI").is_ok() {
         bail!("APPLE_SIGNING_IDENTITY is not set, refusing to build an unsigned release in CI");
@@ -33,12 +35,15 @@ fn main() -> Result<()> {
     }
     for target in TARGETS {
         run(&format!("rustup target add {target}"))?;
-        run(&format!("cargo build --release --target {target}"))?;
+        run(&format!(
+            "cargo build --locked --release -p {} --bin {} --target {target}",
+            r.name, r.bin
+        ))?;
     }
     let universal = format!("target/release/{}-universal", r.name);
     run(&format!(
         "lipo -create -output {universal} target/{}/release/{} target/{}/release/{}",
-        TARGETS[0], r.name, TARGETS[1], r.name
+        TARGETS[0], r.bin, TARGETS[1], r.bin
     ))?;
 
     let app = bundle(&r, &universal)?;
@@ -65,11 +70,14 @@ fn main() -> Result<()> {
 }
 
 fn unlock_keychain() -> Result<()> {
-    let password = std::env::var("APPLE_CI_KEYCHAIN_PASSWORD").context("APPLE_CI_KEYCHAIN_PASSWORD")?;
+    // The password stays a shell variable, so it is never part of a printed command.
+    std::env::var("APPLE_CI_KEYCHAIN_PASSWORD").context("APPLE_CI_KEYCHAIN_PASSWORD")?;
     let keychain = "~/Library/Keychains/ci-signing.keychain-db";
-    run(&format!(r#"security unlock-keychain -p "{password}" {keychain}"#))?;
-    run(&format!(
-        r#"security set-key-partition-list -S apple-tool:,apple: -k "{password}" {keychain} > /dev/null"#
+    run_secret(&format!(
+        r#"security unlock-keychain -p "$APPLE_CI_KEYCHAIN_PASSWORD" {keychain}"#
+    ))?;
+    run_secret(&format!(
+        r#"security set-key-partition-list -S apple-tool:,apple: -k "$APPLE_CI_KEYCHAIN_PASSWORD" {keychain} > /dev/null"#
     ))?;
     run(&format!(
         "security list-keychains -d user -s {keychain} ~/Library/Keychains/login.keychain-db"

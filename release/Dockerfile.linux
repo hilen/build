@@ -28,4 +28,8 @@ RUN ARCH=$(uname -m) \
        done
 
 ENV APPIMAGE_EXTRACT_AND_RUN=1
+ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
+RUN git config --global url."https://github.com/".insteadOf "git@github.com:" \
+ && git config --global http.version HTTP/1.1
+
 WORKDIR /work/apps/app

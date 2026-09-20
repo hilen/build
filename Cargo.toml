@@ -17,6 +17,11 @@ sha2 = "0.10"
 shared = { path = "shared" }
 tokio = { version = "1", features = ["full"] }
 
+# The scripts use these, there is no src folder for cargo machete to scan. An
+# app whose .gitignore does not hide build/ would fail its machete check here.
+[package.metadata.cargo-machete]
+ignored = ["anyhow", "ed25519-dalek", "hex", "regex", "reqwest", "serde", "serde_json", "sha2", "shared", "tokio"]
+
 # Its own workspace root, so the submodule stays self contained and a consuming
 # repo never has to list it as a member.
 [workspace]

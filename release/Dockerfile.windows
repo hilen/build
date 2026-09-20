@@ -25,4 +25,8 @@ ENV CARGO_TARGET_AARCH64_PC_WINDOWS_MSVC_LINKER=lld-link
 COPY clang-xwin-wrapper.sh /usr/local/bin/clang
 RUN chmod +x /usr/local/bin/clang
 
+ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
+RUN git config --global url."https://github.com/".insteadOf "git@github.com:" \
+ && git config --global http.version HTTP/1.1
+
 WORKDIR /work/apps/app

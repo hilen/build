@@ -1,10 +1,10 @@
 ; Per user install of one exe, a start menu shortcut and an uninstaller.
-; makensis -DNAME=.. -DVERSION=.. -DEXE=path -DICON=path -DOUT=path installer.nsi
+; makensis -DNAME=.. -DVERSION=.. -DEXE=path -DICON=path -DOUTPUT=path installer.nsi
 ; /S installs silently, which the updater never needs, it swaps the exe itself.
 
 Unicode true
 Name "${NAME}"
-OutFile "${OUT}"
+OutFile "${OUTPUT}"
 InstallDir "$LOCALAPPDATA\Programs\${NAME}"
 InstallDirRegKey HKCU "Software\${NAME}" "InstallDir"
 RequestExecutionLevel user

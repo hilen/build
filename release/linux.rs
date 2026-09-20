@@ -36,20 +36,21 @@ fn main() -> Result<()> {
     docker::build_image(&image, "Dockerfile.linux", platform)?;
     let script = format!(
         r#"set -euo pipefail
-cargo build --release
-BIN=target/release-linux/release/{name}
+cargo build --locked --release -p {name} --bin {bin}
+BIN=target/release-linux/release/{bin}
 OUT={stage}/out
 rm -rf $OUT /tmp/out && mkdir -p $OUT /tmp/out
-cargo deb --no-build --no-strip -o $OUT/{name}.deb
+cargo deb -p {name} --no-build --no-strip -o $OUT/{name}.deb
 cd /tmp/out
 linuxdeploy --appdir AppDir -e /work/apps/app/$BIN -d /work/apps/app/{stage}/{name}.desktop -i /work/apps/app/{stage}/{name}.png --output appimage
 cd /work/apps/app
 cp /tmp/out/{name}-*.AppImage $OUT/{name}.AppImage
 cp $BIN $OUT/{name}"#,
         name = r.name,
+        bin = r.bin,
         stage = STAGE
     );
-    docker::run_in(&image, platform, "release-linux", &script)?;
+    docker::run_in(&r.name, &image, platform, "release-linux", "linux-stage", &script)?;
 
     let out = format!("{STAGE}/out");
     let deb = format!("dist/{}", r.artifact(&format!("linux-{arch}.deb")));
@@ -82,12 +83,13 @@ fn write_desktop_file(r: &Release) -> Result<()> {
             r#"[Desktop Entry]
 Type=Application
 Name={name}
-Exec={name}
+Exec={bin}
 Icon={name}
 Categories=Development;
 Terminal=false
 "#,
-            name = r.name
+            name = r.name,
+            bin = r.bin
         ),
     )?;
     Ok(())

@@ -43,15 +43,16 @@ fn main() -> Result<()> {
     for (arch, triple) in &targets {
         script.push_str(&format!(
             r#"rustup target add {triple}
-cargo xwin build --release --target {triple}
-makensis -DNAME={name} -DVERSION={version} -DEXE=/work/apps/app/target/release-win/{triple}/release/{name}.exe -DICON=/work/apps/app/assets/icon.ico -DOUT=/work/apps/app/{stage}/{name}-{arch}-setup.exe build/release/installer.nsi
-cp /work/apps/app/target/release-win/{triple}/release/{name}.exe /work/apps/app/{stage}/{name}-{arch}.exe
+cargo xwin build --locked --release -p {name} --bin {bin} --target {triple}
+makensis -DNAME={name} -DVERSION={version} -DEXE=/work/apps/app/target/release-win/{triple}/release/{bin}.exe -DICON=/work/apps/app/assets/icon.ico -DOUTPUT=/work/apps/app/{stage}/{name}-{arch}-setup.exe build/release/installer.nsi
+cp /work/apps/app/target/release-win/{triple}/release/{bin}.exe /work/apps/app/{stage}/{name}-{arch}.exe
 "#,
             name = r.name,
+            bin = r.bin,
             version = r.version
         ));
     }
-    docker::run_in(&image, platform, "release-win", &script)?;
+    docker::run_in(&r.name, &image, platform, "release-win", "win-stage", &script)?;
 
     for (arch, _) in &targets {
         let setup = format!("dist/{}", r.artifact(&format!("windows-{arch}-setup.exe")));
