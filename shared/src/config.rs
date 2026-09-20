@@ -18,6 +18,8 @@ pub struct Config {
     /// value. The App Store rejects an upload whose version is not higher than
     /// the live one.
     pub version: String,
+    /// Minimum iOS version written into every generated Xcode configuration.
+    pub ios_minimum_version: String,
 }
 
 /// Read from the repo root. Several scripts chdir into mobile/iOS partway
@@ -38,6 +40,10 @@ pub fn read() -> Result<Config> {
         .as_str()
         .unwrap_or_default();
     let version = value.get("version").and_then(|v| v.as_str()).unwrap_or("1.0");
+    let ios_minimum_version = value
+        .get("ios_minimum_version")
+        .and_then(|v| v.as_str())
+        .unwrap_or("12.0");
 
     let parts = words(project);
     let snake = parts.join("_");
@@ -48,6 +54,7 @@ pub fn read() -> Result<Config> {
         lib_name: format!("lib{snake}.a"),
         bundle_id: bundle_id.to_string(),
         version: version.to_string(),
+        ios_minimum_version: ios_minimum_version.to_string(),
     })
 }
 

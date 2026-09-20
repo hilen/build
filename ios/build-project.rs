@@ -1,8 +1,10 @@
 #!/usr/bin/env rust
 
-use anyhow::Result;
-use shared::config;
-use shared::run::run;
+use std::fs::{read_to_string, write};
+
+use anyhow::{Result, ensure};
+use regex::Regex;
+use shared::{config, run::run};
 
 fn main() -> Result<()> {
     let config = config::read()?;
@@ -18,6 +20,21 @@ fn main() -> Result<()> {
 
     let args: Vec<String> = std::env::args().skip(1).collect();
     run(format!("hilen-mobile {}", args.join(" ")).trim())?;
+
+    // The generator's template has its own deployment target. Apply the app's
+    // configured minimum after every regeneration, for local builds and fly.
+    let project_path = format!("mobile/iOS/{}.xcodeproj/project.pbxproj", config.project_name);
+    let project = read_to_string(&project_path)?;
+    let target = Regex::new(r"IPHONEOS_DEPLOYMENT_TARGET = [0-9.]+;")?;
+    ensure!(
+        target.is_match(&project),
+        "generated Xcode project has no iOS deployment target"
+    );
+    let setting = format!("IPHONEOS_DEPLOYMENT_TARGET = {};", config.ios_minimum_version);
+    write(
+        &project_path,
+        target.replace_all(&project, setting.as_str()).as_bytes(),
+    )?;
 
     // hilen-mobile bakes CFBundleShortVersionString 1.0 into the generated
     // Info.plist with no knob, so set the real version before the archive reads
