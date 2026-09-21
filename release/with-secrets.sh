@@ -7,6 +7,10 @@
 set -euo pipefail
 
 export PATH="/run/current-system/sw/bin:$HOME/.nix-profile/bin:$PATH"
+# Every shipped build runs through this script. The engine build script reads
+# the mark and fails an app with the `login` feature that has no
+# HILEN_SESSION_KEY, so a release never ships with the development key.
+export HILEN_RELEASE=1
 INFISICAL_URL="${INFISICAL_URL:-https://infisical.vladas.xyz}"
 
 projects=()
