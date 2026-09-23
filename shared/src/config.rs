@@ -39,7 +39,10 @@ pub fn read() -> Result<Config> {
         .context("bundle_id not found in hilen.toml")?
         .as_str()
         .unwrap_or_default();
-    let version = value.get("version").and_then(|v| v.as_str()).unwrap_or("1.0");
+    let version = value
+        .get("version")
+        .and_then(|v| v.as_str())
+        .unwrap_or("1.0");
     let ios_minimum_version = value
         .get("ios_minimum_version")
         .and_then(|v| v.as_str())

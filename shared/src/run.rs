@@ -2,22 +2,26 @@
 //! targets and the old scripts wrote them, so a pipe or a quoted argument keeps
 //! working without being taken apart into an argv.
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::process::{Command, Stdio};
 
 use anyhow::{Result, bail};
 
 /// The shell that runs a command string, cmd on Windows and sh elsewhere.
+/// cmd gets the string untouched. A plain `arg` would wrap it in quotes with
+/// `\"` escapes, which cmd does not know, and split every quoted argument.
+#[cfg(windows)]
 fn shell(cmd: &str) -> Command {
-    let mut c = if cfg!(windows) {
-        let mut c = Command::new("cmd");
-        c.arg("/C");
-        c
-    } else {
-        let mut c = Command::new("sh");
-        c.arg("-c");
-        c
-    };
-    c.arg(cmd);
+    let mut c = Command::new("cmd");
+    c.arg("/C").raw_arg(cmd);
+    c
+}
+
+#[cfg(not(windows))]
+fn shell(cmd: &str) -> Command {
+    let mut c = Command::new("sh");
+    c.arg("-c").arg(cmd);
     c
 }
 
@@ -43,7 +47,10 @@ pub fn run_allow_fail(cmd: &str) {
 /// never reaches the log.
 pub fn capture(cmd: &str) -> Result<String> {
     println!("{cmd}");
-    let out = shell(cmd).stdout(Stdio::piped()).stderr(Stdio::inherit()).output()?;
+    let out = shell(cmd)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .output()?;
     if !out.status.success() {
         bail!("command failed: {cmd}");
     }
@@ -83,4 +90,18 @@ pub fn run_quiet(cmd: &str) -> Result<String> {
         bail!("command failed: {cmd}");
     }
     Ok(text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Windows quoted the whole command for cmd with `\"` escapes, which cmd does
+    // not know, so a quoted argument with a space reached git as two words.
+    #[test]
+    fn a_quoted_argument_stays_one_argument() -> Result<()> {
+        let out = capture(r#"git config --default "release v1.2.3" --get shared.test.missing"#)?;
+        assert_eq!(out, "release v1.2.3");
+        Ok(())
+    }
 }

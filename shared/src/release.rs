@@ -69,7 +69,8 @@ pub fn read() -> Result<Release> {
     let hilen: Hilen =
         toml::from_str(&read_to_string("hilen.toml")?).context("[release] table in hilen.toml")?;
 
-    let metadata: Metadata = serde_json::from_str(&capture("cargo metadata --no-deps --format-version 1")?)?;
+    let metadata: Metadata =
+        serde_json::from_str(&capture("cargo metadata --no-deps --format-version 1")?)?;
     let package = metadata
         .packages
         .into_iter()
