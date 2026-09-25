@@ -18,14 +18,15 @@ fn main() -> Result<()> {
     let r = release::read()?;
     let node: Deployment = reqwest::blocking::get(format!(
         "https://beekeeper.tailf87cbe.ts.net/api/deployments/by-name/{}",
-        r.host_deployment
+        r.host_deployment()?
     ))?
     .error_for_status()?
     .json()?;
     let host = format!("{}.tailf87cbe.ts.net", node.node_hostname);
     let dir = format!(
         "deployments/{}/data/download/{}",
-        r.host_deployment, r.target_subdir
+        r.host_deployment()?,
+        r.target_subdir()?
     );
     run(&format!(r#"ssh {host} "mkdir -p {dir}""#))?;
 
@@ -42,7 +43,7 @@ fn main() -> Result<()> {
     }
     for name in &names {
         if !name.ends_with(".meta.json") {
-            println!("{}/{name}", r.download_url);
+            println!("{}/{name}", r.download_url()?);
         }
     }
     Ok(())

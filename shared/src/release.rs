@@ -9,7 +9,10 @@ use std::fs::read_to_string;
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
-use crate::{config, run::capture};
+use crate::{
+    config,
+    run::{capture, run},
+};
 
 pub struct Release {
     /// cargo package name, the artifact file name prefix
@@ -19,17 +22,41 @@ pub struct Release {
     pub version: String,
     pub bundle_id: String,
     /// where the binaries are served, no trailing slash
-    pub download_url: String,
+    pub download_url: Option<String>,
     /// the beekeeper deployment whose data/download/ holds the binaries
-    pub host_deployment: String,
+    pub host_deployment: Option<String>,
     /// subdirectory under that data/download/
-    pub target_subdir: String,
+    pub target_subdir: Option<String>,
+    /// false for an app without the engine updater, its binaries are not signed
+    pub self_update: bool,
 }
 
 impl Release {
     /// `kukareker-0.2.0-mac-universal.dmg` style names.
     pub fn artifact(&self, suffix: &str) -> String {
         format!("{}-{}-{suffix}", self.name, self.version)
+    }
+
+    pub fn download_url(&self) -> Result<&str> {
+        self.download_url.as_deref().context("download_url in the [release] table of hilen.toml")
+    }
+
+    pub fn host_deployment(&self) -> Result<&str> {
+        self.host_deployment
+            .as_deref()
+            .context("host_deployment in the [release] table of hilen.toml")
+    }
+
+    pub fn target_subdir(&self) -> Result<&str> {
+        self.target_subdir.as_deref().context("target_subdir in the [release] table of hilen.toml")
+    }
+
+    /// Signs `files` for the updater, nothing for an app without it.
+    pub fn sign(&self, files: &[&str]) -> Result<()> {
+        if !self.self_update {
+            return Ok(());
+        }
+        run(&format!("rust build/release/sign.rs {}", files.join(" ")))
     }
 }
 
@@ -38,11 +65,20 @@ struct Hilen {
     release: Distribution,
 }
 
+/// The download host fields are for apps served from a beekeeper
+/// deployment. An app shipped some other way, like a game uploaded to its own
+/// backend, leaves them out.
 #[derive(Deserialize)]
 struct Distribution {
-    download_url: String,
-    host_deployment: String,
-    target_subdir: String,
+    download_url: Option<String>,
+    host_deployment: Option<String>,
+    target_subdir: Option<String>,
+    #[serde(default = "yes")]
+    self_update: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 #[derive(Deserialize)]
@@ -108,8 +144,12 @@ pub fn read() -> Result<Release> {
         bin,
         version: package.version,
         bundle_id: config.bundle_id,
-        download_url: hilen.release.download_url.trim_end_matches('/').to_string(),
+        download_url: hilen
+            .release
+            .download_url
+            .map(|url| url.trim_end_matches('/').to_string()),
         host_deployment: hilen.release.host_deployment,
         target_subdir: hilen.release.target_subdir,
+        self_update: hilen.release.self_update,
     })
 }

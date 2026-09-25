@@ -26,7 +26,13 @@ fn main() -> Result<()> {
     write_version(&version)?;
     let tag = format!("v{version}");
     run("git add Cargo.toml Cargo.lock")?;
-    run(&format!(r#"git commit -m "release {tag}""#))?;
+    // A first release can find the version already written, then the
+    // commit it would make is empty and git refuses it.
+    if capture("git diff --cached --name-only")?.is_empty() {
+        println!("Cargo.toml already says {version}, tagging HEAD");
+    } else {
+        run(&format!(r#"git commit -m "release {tag}""#))?;
+    }
     run(&format!("git tag {tag}"))?;
     run(&format!("git push origin HEAD {tag}"))?;
     println!("released {tag}");

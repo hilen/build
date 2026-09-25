@@ -64,7 +64,7 @@ fn main() -> Result<()> {
 
     let bare = format!("dist/{}", r.artifact("macos-universal"));
     std::fs::copy(&universal, &bare)?;
-    run(&format!("rust build/release/sign.rs {bare}"))?;
+    r.sign(&[&bare])?;
     println!("built {bare}");
     Ok(())
 }

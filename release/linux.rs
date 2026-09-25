@@ -13,7 +13,6 @@ use anyhow::{Result, bail};
 
 const STAGE: &str = "target/linux-stage";
 use shared::release::{self, Release};
-use shared::run::run;
 
 fn main() -> Result<()> {
     let r = release::read()?;
@@ -59,7 +58,7 @@ cp $BIN $OUT/{name}"#,
     std::fs::copy(format!("{out}/{}.deb", r.name), &deb)?;
     std::fs::copy(format!("{out}/{}.AppImage", r.name), &appimage)?;
     std::fs::copy(format!("{out}/{}", r.name), &bare)?;
-    run(&format!("rust build/release/sign.rs {bare} {appimage}"))?;
+    r.sign(&[&bare, &appimage])?;
     for f in [&deb, &appimage, &bare] {
         println!("built {f}");
     }

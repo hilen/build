@@ -146,7 +146,7 @@ fn updater_manifest(r: &Release, has: &dyn Fn(&str) -> Option<String>) -> Result
         platforms.insert(
             key.to_string(),
             Platform {
-                url: format!("{}/{name}", r.download_url),
+                url: format!("{}/{name}", r.download_url()?),
                 size: meta.size,
                 sha256: meta.sha256,
                 sig: meta.sig,

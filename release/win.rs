@@ -9,7 +9,6 @@ mod docker;
 
 use anyhow::{Result, bail};
 use shared::release;
-use shared::run::run;
 
 const TARGETS: [(&str, &str); 2] = [
     ("x64", "x86_64-pc-windows-msvc"),
@@ -59,7 +58,7 @@ cp /work/apps/app/target/release-win/{triple}/release/{bin}.exe /work/apps/app/{
         let bare = format!("dist/{}", r.artifact(&format!("windows-{arch}.exe")));
         std::fs::copy(format!("{stage}/{}-{arch}-setup.exe", r.name), &setup)?;
         std::fs::copy(format!("{stage}/{}-{arch}.exe", r.name), &bare)?;
-        run(&format!("rust build/release/sign.rs {bare}"))?;
+        r.sign(&[&bare])?;
         println!("built {setup}");
         println!("built {bare}");
     }
