@@ -13,6 +13,7 @@ use shared::release::{self, Release};
 use shared::run::{capture, run, run_secret};
 
 const TARGETS: [&str; 2] = ["aarch64-apple-darwin", "x86_64-apple-darwin"];
+const NOTARIZE_LIMIT_SECS: u32 = 900;
 
 fn main() -> Result<()> {
     let r = release::read()?;
@@ -137,12 +138,18 @@ fn notarize_app(app: &str) -> Result<()> {
 }
 
 fn notarize(file: &str) -> Result<()> {
-    let apple_id = std::env::var("APPLE_ID_EMAIL").context("APPLE_ID_EMAIL")?;
-    let password = std::env::var("APPLE_APP_SPECIFIC_PASSWORD").context("APPLE_APP_SPECIFIC_PASSWORD")?;
-    let team = std::env::var("APPLE_TEAM_ID").context("APPLE_TEAM_ID")?;
-    run(&format!(
-        r#"xcrun notarytool submit "{file}" --apple-id "{apple_id}" --password "{password}" --team-id "{team}" --wait"#
-    ))?;
+    for var in ["APPLE_ID_EMAIL", "APPLE_APP_SPECIFIC_PASSWORD", "APPLE_TEAM_ID"] {
+        std::env::var(var).context(var)?;
+    }
+    // The secrets stay shell variables and the command is not echoed, the
+    // release logs once showed the password. notarytool has no limit on the
+    // upload, a stalled one hung a release for 28 minutes, so perl's alarm
+    // kills it. A normal upload and wait takes under 5 minutes.
+    println!("notarizing {file}");
+    run_secret(&format!(
+        r#"perl -e 'alarm shift; exec @ARGV' {NOTARIZE_LIMIT_SECS} xcrun notarytool submit "{file}" --apple-id "$APPLE_ID_EMAIL" --password "$APPLE_APP_SPECIFIC_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait"#
+    ))
+    .with_context(|| format!("notarizing {file} failed or took over {NOTARIZE_LIMIT_SECS} seconds"))?;
     if file.ends_with(".dmg") {
         run(&format!(r#"xcrun stapler staple "{file}""#))?;
     }
