@@ -10,6 +10,9 @@
 set -eu
 
 PROJECT="${INFISICAL_PROJECT:-}"
+# An app's Makefile can pass cargo features for its dev run in RUN_FEATURES,
+# like a `dev` feature that turns on the hilen inspect server.
+FEATURES="${RUN_FEATURES:+--features $RUN_FEATURES}"
 CONFIG="$HOME/.infisical/infisical-config.json"
 
 # Only WSL gets the automatic dependency install. A mac or a normal Linux box
@@ -26,11 +29,11 @@ if [ -n "$PROJECT" ] \
 	&& command -v infisical >/dev/null 2>&1 \
 	&& [ -f "$CONFIG" ] \
 	&& grep -q '"loggedInUserEmail":"[^"]' "$CONFIG"; then
-	infisical run --projectId "$PROJECT" --env prod -- cargo build --release
-	infisical run --projectId "$PROJECT" --env prod -- cargo run --release
+	infisical run --projectId "$PROJECT" --env prod -- cargo build --release $FEATURES
+	infisical run --projectId "$PROJECT" --env prod -- cargo run --release $FEATURES
 else
 	echo "infisical not available or not logged in, running without the Sentry setup"
 	echo "the bug report button will do nothing, everything else works"
-	cargo build --release
-	cargo run --release
+	cargo build --release $FEATURES
+	cargo run --release $FEATURES
 fi

@@ -3,7 +3,7 @@
 use std::process::Command;
 
 use anyhow::{Result, bail};
-use shared::config;
+use shared::{config, inspect};
 
 fn main() -> Result<()> {
     let config = config::read()?;
@@ -70,6 +70,10 @@ fn main() -> Result<()> {
     ]);
     if !abi.is_empty() {
         args.extend(["-e", &abi_env]);
+    }
+    // By name, so the container is a release build only when the host is.
+    if inspect::is_release() {
+        args.extend(["-e", inspect::RELEASE_ENV]);
     }
     args.extend([&image, "/bin/bash", "-c", "rust ./build/build.rs android"]);
 

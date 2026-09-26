@@ -9,6 +9,7 @@
 //   <name>-<v>-macos-universal        the bare binary the updater swaps in
 
 use anyhow::{Context, Result, bail};
+use shared::inspect;
 use shared::release::{self, Release};
 use shared::run::{capture, run, run_secret};
 
@@ -16,6 +17,7 @@ const TARGETS: [&str; 2] = ["aarch64-apple-darwin", "x86_64-apple-darwin"];
 const NOTARIZE_LIMIT_SECS: u32 = 900;
 
 fn main() -> Result<()> {
+    inspect::mark_release();
     let r = release::read()?;
     std::fs::create_dir_all("dist")?;
     // lipo writes here, and a fresh checkout that only built with --target has no such folder yet.
@@ -46,6 +48,7 @@ fn main() -> Result<()> {
         "lipo -create -output {universal} target/{}/release/{} target/{}/release/{}",
         TARGETS[0], r.bin, TARGETS[1], r.bin
     ))?;
+    inspect::refuse(&universal)?;
 
     let app = bundle(&r, &universal)?;
     if let Some(identity) = &signing {

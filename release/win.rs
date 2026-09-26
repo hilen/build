@@ -8,7 +8,7 @@
 mod docker;
 
 use anyhow::{Result, bail};
-use shared::release;
+use shared::{inspect, release};
 
 const TARGETS: [(&str, &str); 2] = [
     ("x64", "x86_64-pc-windows-msvc"),
@@ -16,6 +16,7 @@ const TARGETS: [(&str, &str); 2] = [
 ];
 
 fn main() -> Result<()> {
+    inspect::mark_release();
     let r = release::read()?;
     let only = std::env::args()
         .skip(1)
@@ -53,6 +54,10 @@ cp /work/apps/app/target/release-win/{triple}/release/{bin}.exe /work/apps/app/{
     }
     docker::run_in(&r.name, &image, platform, "release-win", "win-stage", &script)?;
 
+    // The setup exe packs this same exe, so a clean exe means a clean setup.
+    for (arch, _) in &targets {
+        inspect::refuse(&format!("{stage}/{}-{arch}.exe", r.name))?;
+    }
     for (arch, _) in &targets {
         let setup = format!("dist/{}", r.artifact(&format!("windows-{arch}-setup.exe")));
         let bare = format!("dist/{}", r.artifact(&format!("windows-{arch}.exe")));

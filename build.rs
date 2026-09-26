@@ -1,7 +1,7 @@
 #!/usr/bin/env rust
 
 use anyhow::{Result, bail};
-use shared::config;
+use shared::{config, inspect};
 use shared::run::{probe, run};
 
 fn main() -> Result<()> {
@@ -107,6 +107,11 @@ i686-linux-android x86_64-linux-android",
         run("./gradlew build")?;
     } else {
         run("./gradlew assembleDebug")?;
+    }
+    // A test build of demo carries the inspect server on purpose, only a
+    // shipped build is checked. Every ABI's .so sits under this folder.
+    if inspect::is_release() {
+        inspect::refuse("app/build/rustJniLibs/android")?;
     }
     Ok(())
 }

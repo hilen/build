@@ -12,9 +12,11 @@ mod docker;
 use anyhow::{Result, bail};
 
 const STAGE: &str = "target/linux-stage";
+use shared::inspect;
 use shared::release::{self, Release};
 
 fn main() -> Result<()> {
+    inspect::mark_release();
     let r = release::read()?;
     let arch = std::env::args()
         .skip(1)
@@ -52,6 +54,8 @@ cp $BIN $OUT/{name}"#,
     docker::run_in(&r.name, &image, platform, "release-linux", "linux-stage", &script)?;
 
     let out = format!("{STAGE}/out");
+    // The .deb and the AppImage pack this same binary.
+    inspect::refuse(&format!("{out}/{}", r.name))?;
     let deb = format!("dist/{}", r.artifact(&format!("linux-{arch}.deb")));
     let appimage = format!("dist/{}", r.artifact(&format!("linux-{arch}.AppImage")));
     let bare = format!("dist/{}", r.artifact(&format!("linux-{rust_arch}")));

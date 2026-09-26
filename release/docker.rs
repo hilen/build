@@ -32,8 +32,10 @@ pub fn run_in(app: &str, image: &str, platform: &str, lane: &str, stage: &str, s
     // the host means unset in the container.
     let sentry = format!("{}_SENTRY_URL", app.to_uppercase().replace('-', "_"));
     // The engine build script masks HILEN_SESSION_KEY into an app with the
-    // `login` feature, and HILEN_RELEASE makes it refuse the development key.
-    // Both pass by name for the same reason as the DSN.
+    // `login` feature, passed by name for the same reason as the DSN.
+    // HILEN_RELEASE=1 makes it refuse the development key and the `inspect`
+    // feature. It is set here, not taken from the host, so this lane is always
+    // a release.
     // The container runs as root. On a Linux host the staged files would stay
     // root owned, and the next run or the runner cleanup could not touch them.
     let uid = capture("id -u")?;
@@ -49,7 +51,7 @@ pub fn run_in(app: &str, image: &str, platform: &str, lane: &str, stage: &str, s
   -e CARGO_TARGET_DIR=/work/apps/app/target/{lane} \
   -e {sentry} \
   -e HILEN_SESSION_KEY \
-  -e HILEN_RELEASE \
+  -e HILEN_RELEASE=1 \
   {image} bash -c 'trap "chown -R {uid}:{gid} /work/apps/app/target/{stage}" EXIT; {script}'"#
     ))
 }
