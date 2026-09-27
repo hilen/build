@@ -11,7 +11,7 @@ export PATH="/run/current-system/sw/bin:$HOME/.nix-profile/bin:$PATH"
 # the mark and fails an app with the `login` feature that has no
 # HILEN_SESSION_KEY, so a release never ships with the development key.
 export HILEN_RELEASE=1
-INFISICAL_URL="${INFISICAL_URL:-https://infisical.vladas.xyz}"
+INFISICAL_URL="${INFISICAL_URL:-https://infisical.tailf87cbe.ts.net}"
 
 projects=()
 while [ "${1-}" != "--" ]; do
