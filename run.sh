@@ -23,12 +23,13 @@ fi
 
 # Probe the login state from the config file, not by calling infisical. A not
 # logged in `infisical export` launches an interactive login and still exits 0,
-# so it cannot be used to detect the state. The config records the logged in
-# email, empty when there is no session.
+# so it cannot be used to detect the state. Older CLIs record the logged in
+# email in loggedInUserEmail. Since 0.43 that stays empty and the login is the
+# activeProfile, and the file is pretty printed, with a space after the colon.
 if [ -n "$PROJECT" ] \
 	&& command -v infisical >/dev/null 2>&1 \
 	&& [ -f "$CONFIG" ] \
-	&& grep -q '"loggedInUserEmail":"[^"]' "$CONFIG"; then
+	&& grep -Eq '"(loggedInUserEmail|activeProfile)"[[:space:]]*:[[:space:]]*"[^"]' "$CONFIG"; then
 	infisical run --projectId "$PROJECT" --env prod -- cargo build --release $FEATURES
 	infisical run --projectId "$PROJECT" --env prod -- cargo run --release $FEATURES
 else
