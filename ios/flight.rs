@@ -1,6 +1,8 @@
 #!/usr/bin/env rust
 
-use anyhow::Result;
+use std::fs::read_to_string;
+
+use anyhow::{Result, ensure};
 use shared::config;
 use shared::run::{capture, run};
 
@@ -74,11 +76,20 @@ xcodebuild -exportArchive -archivePath \"{archive_path}\" \
     }
 
     // The password stays a shell variable so it never gets printed in the
-    // echoed command.
+    // echoed command. altool exits 0 even when App Store Connect refuses the
+    // build, so its output is kept and read. A rejected upload once printed
+    // "upload: OK".
+    let upload_log = "build/upload.log";
     run(&format!(
         "xcrun altool --upload-app -f \"{ipa_path}\" -u 146100@gmail.com \
--p \"$APPLE_APP_SPECIFIC_PASSWORD\" --type ios"
+-p \"$APPLE_APP_SPECIFIC_PASSWORD\" --type ios 2>&1 | tee {upload_log}"
     ))?;
+    let output = read_to_string(upload_log)?;
+    ensure!(
+        !output.contains("UPLOAD FAILED")
+            && (output.contains("UPLOAD SUCCEEDED") || output.contains("No errors uploading")),
+        "upload failed, see the altool output above"
+    );
     println!("upload: OK");
     Ok(())
 }

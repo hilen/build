@@ -19,6 +19,7 @@ pub struct Config {
     /// the live one.
     pub version: String,
     /// Minimum iOS version written into every generated Xcode configuration.
+    /// App Store Connect rejects an upload that targets below iOS 13.
     pub ios_minimum_version: String,
 }
 
@@ -46,7 +47,7 @@ pub fn read() -> Result<Config> {
     let ios_minimum_version = value
         .get("ios_minimum_version")
         .and_then(|v| v.as_str())
-        .unwrap_or("12.0");
+        .unwrap_or("13.0");
 
     let parts = words(project);
     let snake = parts.join("_");
