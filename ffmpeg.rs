@@ -12,6 +12,9 @@ use sha2::{Digest, Sha256};
 use shared::run::{capture, run};
 
 const VERSION: &str = "9.0";
+/// The software AV1 decoder, built here and packed into the archive. ffmpeg
+/// has no AV1 decoder of its own that runs without a hardware one.
+const DAV1D: &str = "1.5.4";
 
 fn main() -> Result<()> {
     let triple = host_triple()?;
@@ -29,6 +32,25 @@ fn main() -> Result<()> {
     if dist.exists() {
         std::fs::remove_dir_all(&dist)?;
     }
+
+    // dav1d first, into the same prefix, so ffmpeg finds it through
+    // pkg-config and its static library lands next to the ffmpeg ones.
+    let dav1d_src = root.join("target/dav1d-src");
+    let dav1d_build = root.join("target/dav1d-build");
+    let dav1d_src_str = dav1d_src.display().to_string();
+    let dav1d_build_str = dav1d_build.display().to_string();
+    if !dav1d_src.join("meson.build").exists() {
+        run(&format!(
+            "git clone --depth=1 -b {DAV1D} https://code.videolan.org/videolan/dav1d.git {dav1d_src_str}"
+        ))?;
+    }
+    if dav1d_build.exists() {
+        std::fs::remove_dir_all(&dav1d_build)?;
+    }
+    run(&format!(
+        "meson setup {dav1d_build_str} {dav1d_src_str} --prefix={dist_str} --libdir=lib --default-library=static --buildtype=release -Denable_tools=false -Denable_tests=false"
+    ))?;
+    run(&format!("ninja -C {dav1d_build_str} install"))?;
 
     // Autodetect is off, so the system TLS is named here too. Without it the
     // archive has no https protocol.
@@ -57,7 +79,18 @@ fn main() -> Result<()> {
         "--enable-swresample",
         "--enable-swscale",
         "--disable-avdevice",
-        "--disable-avfilter",
+        // Only the filters the engine uses: atempo changes the speed of the
+        // sound and keeps its pitch, the other 2 are the ends of its graph.
+        "--enable-avfilter",
+        "--disable-filters",
+        "--enable-filter=atempo",
+        "--enable-filter=abuffer",
+        "--enable-filter=abuffersink",
+        // zlib for files with compressed headers, dav1d for AV1 where the
+        // hardware has no decoder.
+        "--enable-zlib",
+        "--enable-libdav1d",
+        "--pkg-config-flags=--static",
         "--disable-gpl",
         "--disable-version3",
         "--disable-nonfree",
@@ -65,9 +98,13 @@ fn main() -> Result<()> {
     .join(" ");
 
     run(&format!(
-        "cd {src_str} && ./configure --prefix={dist_str} {flags} {hw}"
+        "cd {src_str} && PKG_CONFIG_PATH={dist_str}/lib/pkgconfig ./configure --prefix={dist_str} {flags} {hw}"
     ))?;
     run(&format!("make -C {src_str} -j{} install", jobs()))?;
+
+    // What the archive needs linked besides the ffmpeg libraries, one
+    // `<kind>=<name>` per line. The forked ffmpeg-sys-next reads it.
+    std::fs::write(dist.join("lib/link.txt"), "static=dav1d\ndylib=z\n")?;
 
     std::fs::create_dir_all("dist")?;
     let name = format!("ffmpeg-{VERSION}-{triple}");
