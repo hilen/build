@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde_json = { version = "1.0", features = ["arbitrary_precision", "preserve_order"] }
 toml = "1"
 
 # Its own workspace root, so the submodule stays self contained and a consuming
