@@ -2,7 +2,7 @@
 
 // Builds the static ffmpeg libraries hilen links for video playback, see
 // docs/video.md in hilen. Run once per host. The archive in dist/ goes to a
-// release of this repo and hilen/build.rs downloads it from there, so a
+// release of this repo and the forked ffmpeg-sys-next downloads it from there, so a
 // normal build never compiles ffmpeg. The configure flags mirror what the
 // ffmpeg-sys-next `build` feature passes, minus debug info, so a locally
 // built archive and a downloaded one link the same way.
@@ -30,8 +30,10 @@ fn main() -> Result<()> {
         std::fs::remove_dir_all(&dist)?;
     }
 
+    // Autodetect is off, so the system TLS is named here too. Without it the
+    // archive has no https protocol.
     let hw = if cfg!(target_os = "macos") {
-        "--enable-videotoolbox"
+        "--enable-videotoolbox --enable-securetransport"
     } else if cfg!(target_os = "linux") {
         "--enable-vaapi"
     } else if cfg!(target_os = "windows") {
