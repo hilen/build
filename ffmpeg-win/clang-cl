@@ -1,0 +1,16 @@
+#!/bin/bash
+# clang in cl mode for x86_64 Windows, with the headers of the xwin SDK.
+# In cl mode an argument that starts with `/` is an option, so a source
+# file given by its full Linux path is read as one. Such a path is
+# rewritten as a path relative to the current folder.
+X=/opt/xwin
+args=()
+for a in "$@"; do
+  if [[ "$a" == /* && -f "$a" ]]; then
+    a=$(realpath --relative-to="$PWD" "$a")
+  fi
+  args+=("$a")
+done
+exec clang --driver-mode=cl --target=x86_64-pc-windows-msvc -fuse-ld=lld \
+  /imsvc $X/crt/include /imsvc $X/sdk/include/ucrt /imsvc $X/sdk/include/um /imsvc $X/sdk/include/shared \
+  "${args[@]}"
