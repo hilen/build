@@ -86,9 +86,10 @@ fn main() -> Result<()> {
         present.contains(&name).then_some(name)
     };
 
+    let mac_arch = r.mac_arch()?;
     let site = SiteManifest {
         version: r.version.clone(),
-        mac: has("mac-universal.dmg"),
+        mac: has(&format!("mac-{mac_arch}.dmg")),
         win: Arches {
             x64: has("windows-x64-setup.exe"),
             arm64: has("windows-arm64-setup.exe"),
@@ -119,24 +120,31 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-// The universal mac binary serves both mac keys. Linux gets the bare
-// binary and the AppImage under its own key, the engine picks by how
-// the app runs. A deb install in /usr/bin is not user writable, the
-// engine offers it no update, those users update through apt.
+// The mac binary serves every mac target it was built for, both keys when it
+// is universal. Linux gets the bare binary and the AppImage under its own
+// key, the engine picks by how the app runs. A deb install in /usr/bin is not
+// user writable, the engine offers it no update, those users update through
+// apt.
 fn updater_manifest(r: &Release, has: &dyn Fn(&str) -> Option<String>) -> Result<UpdaterManifest> {
-    let mut platforms = BTreeMap::new();
-    let entries = [
-        ("macos-aarch64", "macos-universal"),
-        ("macos-x86_64", "macos-universal"),
+    let mac = format!("macos-{}", r.mac_arch()?);
+    // The cpu is the first word of a target, `aarch64-apple-darwin`.
+    let mac_entries = r
+        .mac_targets
+        .iter()
+        .filter_map(|target| target.split_once('-'))
+        .map(|(cpu, _)| (format!("macos-{cpu}"), mac.clone()));
+    let other_entries = [
         ("windows-x86_64", "windows-x64.exe"),
         ("windows-aarch64", "windows-arm64.exe"),
         ("linux-x86_64", "linux-x86_64"),
         ("linux-aarch64", "linux-aarch64"),
         ("linux-x86_64-appimage", "linux-x64.AppImage"),
         ("linux-aarch64-appimage", "linux-aarch64.AppImage"),
-    ];
-    for (key, suffix) in entries {
-        let Some(name) = has(suffix) else { continue };
+    ]
+    .map(|(key, suffix)| (key.to_string(), suffix.to_string()));
+    let mut platforms = BTreeMap::new();
+    for (key, suffix) in mac_entries.chain(other_entries) {
+        let Some(name) = has(&suffix) else { continue };
         let meta_path = format!("dist/{name}.meta.json");
         let Ok(text) = std::fs::read_to_string(&meta_path) else {
             eprintln!("warn: {meta_path} missing, {key} left out of updater.json");
@@ -144,9 +152,9 @@ fn updater_manifest(r: &Release, has: &dyn Fn(&str) -> Option<String>) -> Result
         };
         let meta: Meta = serde_json::from_str(&text)?;
         platforms.insert(
-            key.to_string(),
+            key,
             Platform {
-                url: format!("{}/{name}", r.download_url()?),
+                url: format!("{}/{name}", r.download_url),
                 size: meta.size,
                 sha256: meta.sha256,
                 sig: meta.sig,

@@ -1,24 +1,25 @@
 #!/usr/bin/env rust
 
-// The mac release: a universal binary, the .app bundle, Developer ID signing,
-// notarization and the dmg. A local run without the Apple secrets still
-// produces an unsigned dmg to test the bundle with, but in CI a missing
-// APPLE_SIGNING_IDENTITY fails the build so an unsigned release can never
-// ship silently. Outputs in dist/:
-//   <name>-<v>-mac-universal.dmg      first install
-//   <name>-<v>-macos-universal        the bare binary the updater swaps in
+// The mac release: the binary, the .app bundle, Developer ID signing,
+// notarization and the dmg. The binary is universal unless `mac_targets` in
+// the [release] table of hilen.toml names 1 target, <arch> is then `arm64` or
+// `x64`. A local run without the Apple secrets still produces an unsigned dmg
+// to test the bundle with, but in CI a missing APPLE_SIGNING_IDENTITY fails
+// the build so an unsigned release can never ship silently. Outputs in dist/:
+//   <name>-<v>-mac-<arch>.dmg      first install
+//   <name>-<v>-macos-<arch>        the bare binary the updater swaps in
 
 use anyhow::{Context, Result, bail};
 use shared::inspect;
 use shared::release::{self, Release};
 use shared::run::{capture, run, run_secret};
 
-const TARGETS: [&str; 2] = ["aarch64-apple-darwin", "x86_64-apple-darwin"];
 const NOTARIZE_LIMIT_SECS: u32 = 900;
 
 fn main() -> Result<()> {
     inspect::mark_release();
     let r = release::read()?;
+    let arch = r.mac_arch()?;
     std::fs::create_dir_all("dist")?;
     // lipo writes here, and a fresh checkout that only built with --target has no such folder yet.
     std::fs::create_dir_all("target/release")?;
@@ -36,18 +37,20 @@ fn main() -> Result<()> {
     unsafe {
         std::env::set_var("SDKROOT", sdk);
     }
-    for target in TARGETS {
+    for target in &r.mac_targets {
         run(&format!("rustup target add {target}"))?;
         run(&format!(
             "cargo build --locked --release -p {} --bin {} --target {target}",
             r.name, r.bin
         ))?;
     }
-    let universal = format!("target/release/{}-universal", r.name);
-    run(&format!(
-        "lipo -create -output {universal} target/{}/release/{} target/{}/release/{}",
-        TARGETS[0], r.bin, TARGETS[1], r.bin
-    ))?;
+    let universal = format!("target/release/{}-{arch}", r.name);
+    let slices: Vec<String> = r
+        .mac_targets
+        .iter()
+        .map(|target| format!("target/{target}/release/{}", r.bin))
+        .collect();
+    run(&format!("lipo -create -output {universal} {}", slices.join(" ")))?;
     inspect::refuse(&universal)?;
 
     let app = bundle(&r, &universal)?;
@@ -59,14 +62,14 @@ fn main() -> Result<()> {
         notarize_app(&app)?;
     }
 
-    let dmg = format!("dist/{}", r.artifact("mac-universal.dmg"));
+    let dmg = format!("dist/{}", r.artifact(&format!("mac-{arch}.dmg")));
     make_dmg(&r, &app, &dmg)?;
     if signing.is_some() {
         notarize(&dmg)?;
     }
     println!("built {dmg}");
 
-    let bare = format!("dist/{}", r.artifact("macos-universal"));
+    let bare = format!("dist/{}", r.artifact(&format!("macos-{arch}")));
     std::fs::copy(&universal, &bare)?;
     r.sign(&[&bare])?;
     println!("built {bare}");

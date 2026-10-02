@@ -1,0 +1,20 @@
+name: upload
+description: Copies every file in dist/ to the download host over Tailscale.
+
+inputs:
+  host:
+    required: true
+  dl-dir:
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        set -euo pipefail
+        SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+        # The checkout wipes dist/, so it holds only what this job built.
+        for f in dist/*; do
+          scp $SSH_OPTS "$f" uploader@${{ inputs.host }}:${{ inputs.dl-dir }}/
+        done

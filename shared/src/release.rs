@@ -22,11 +22,13 @@ pub struct Release {
     pub version: String,
     pub bundle_id: String,
     /// where the binaries are served, no trailing slash
-    pub download_url: Option<String>,
+    pub download_url: String,
     /// the beekeeper deployment whose data/download/ holds the binaries
-    pub host_deployment: Option<String>,
+    pub host_deployment: String,
     /// subdirectory under that data/download/
-    pub target_subdir: Option<String>,
+    pub target_subdir: String,
+    /// the targets of the mac build, more than 1 is glued into a universal binary
+    pub mac_targets: Vec<String>,
     /// false for an app without the engine updater, its binaries are not signed
     pub self_update: bool,
 }
@@ -37,18 +39,15 @@ impl Release {
         format!("{}-{}-{suffix}", self.name, self.version)
     }
 
-    pub fn download_url(&self) -> Result<&str> {
-        self.download_url.as_deref().context("download_url in the [release] table of hilen.toml")
-    }
-
-    pub fn host_deployment(&self) -> Result<&str> {
-        self.host_deployment
-            .as_deref()
-            .context("host_deployment in the [release] table of hilen.toml")
-    }
-
-    pub fn target_subdir(&self) -> Result<&str> {
-        self.target_subdir.as_deref().context("target_subdir in the [release] table of hilen.toml")
+    /// The word for the mac build in an artifact name, `universal` for the 2
+    /// targets together, else the cpu of the 1 target.
+    pub fn mac_arch(&self) -> Result<&'static str> {
+        match self.mac_targets.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+            [_, _] => Ok("universal"),
+            ["aarch64-apple-darwin"] => Ok("arm64"),
+            ["x86_64-apple-darwin"] => Ok("x64"),
+            other => bail!("mac_targets in hilen.toml must name 1 or 2 mac targets, got {other:?}"),
+        }
     }
 
     /// Signs `files` for the updater, nothing for an app without it.
@@ -65,9 +64,9 @@ struct Hilen {
     release: Distribution,
 }
 
-/// The download host fields are for apps served from a beekeeper
-/// deployment. An app shipped some other way, like a game uploaded to its own
-/// backend, leaves them out.
+/// Every field can be left out. The download host fields then point at the
+/// central download server, the `get` deployment, with the app name as the
+/// folder. An app that still ships from another deployment names it here.
 #[derive(Deserialize)]
 struct Distribution {
     download_url: Option<String>,
@@ -75,6 +74,15 @@ struct Distribution {
     target_subdir: Option<String>,
     #[serde(default = "yes")]
     self_update: bool,
+    #[serde(default = "universal")]
+    mac_targets: Vec<String>,
+}
+
+const DOWNLOAD_HOST: &str = "https://get.vladas.xyz";
+const DOWNLOAD_DEPLOYMENT: &str = "get";
+
+fn universal() -> Vec<String> {
+    vec!["aarch64-apple-darwin".to_string(), "x86_64-apple-darwin".to_string()]
 }
 
 fn yes() -> bool {
@@ -139,17 +147,19 @@ pub fn read() -> Result<Release> {
         );
     };
 
+    let release = hilen.release;
     Ok(Release {
+        download_url: release.download_url.map_or_else(
+            || format!("{DOWNLOAD_HOST}/{}", package.name),
+            |url| url.trim_end_matches('/').to_string(),
+        ),
+        host_deployment: release.host_deployment.unwrap_or_else(|| DOWNLOAD_DEPLOYMENT.to_string()),
+        target_subdir: release.target_subdir.unwrap_or_else(|| package.name.clone()),
+        self_update: release.self_update,
+        mac_targets: release.mac_targets,
         name: package.name,
         bin,
         version: package.version,
         bundle_id: config.bundle_id,
-        download_url: hilen
-            .release
-            .download_url
-            .map(|url| url.trim_end_matches('/').to_string()),
-        host_deployment: hilen.release.host_deployment,
-        target_subdir: hilen.release.target_subdir,
-        self_update: hilen.release.self_update,
     })
 }
