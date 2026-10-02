@@ -170,8 +170,20 @@ fn make_dmg(r: &Release, app: &str, dmg: &str) -> Result<()> {
     if std::path::Path::new(dmg).exists() {
         std::fs::remove_file(dmg)?;
     }
+    // Left to itself hdiutil sizes the image from the folder, and now and then
+    // its guess is too small: `create failed - No space left on device`, on a
+    // disk with 431 GB free, at blackforge v0.2.6. So the size is given, the
+    // folder plus a third. The UDZO format packs the free space away.
+    let used = capture(&format!("du -sk {staging}"))?;
+    let kb: u64 = used
+        .split_whitespace()
+        .next()
+        .with_context(|| format!("du gave no size for {staging}"))?
+        .parse()
+        .with_context(|| format!("du gave no number for {staging}: {used}"))?;
+    let mb = kb / 1024 * 4 / 3 + 32;
     run(&format!(
-        r#"hdiutil create -volname "{}" -srcfolder {staging} -ov -format UDZO "{dmg}""#,
+        r#"hdiutil create -size {mb}m -volname "{}" -srcfolder {staging} -ov -format UDZO "{dmg}""#,
         r.name
     ))?;
     Ok(())
