@@ -65,8 +65,8 @@ fn main() -> Result<()> {
     if ios {
         run("rust ./build/ios/build-project.rs")?;
     } else {
-        run("cargo build --all --profile=ci")?;
-        run("cargo test --all --profile=ci")?;
+        run("cargo build --all")?;
+        run("cargo test --all")?;
     }
     Ok(())
 }
@@ -223,7 +223,8 @@ fn install_linux_deps(release: &str, uname: &str) -> Result<()> {
         println!("Fedora");
         run(
             "sudo dnf install -y libXcursor-devel libXi-devel libXinerama-devel \
-libXrandr-devel perl make cmake automake gcc gcc-c++ kernel-devel alsa-lib-devel-*",
+libXrandr-devel perl make cmake automake gcc gcc-c++ kernel-devel alsa-lib-devel-* \
+dbus-devel pkgconf-pkg-config",
         )?;
     } else if uname.contains("freebsd") {
         println!("Freebsd");
@@ -235,7 +236,7 @@ libXrandr-devel perl make cmake automake gcc gcc-c++ kernel-devel alsa-lib-devel
     } else if release.contains("ubuntu") || release.contains("debian") {
         println!("Debian");
         let mut deps = "cmake mesa-common-dev libgl1-mesa-dev libglu1-mesa-dev \
-xorg-dev libasound2-dev pkg-config libssl-dev"
+xorg-dev libasound2-dev pkg-config libssl-dev libdbus-1-dev"
             .to_string();
         if std::env::consts::ARCH != "aarch64" {
             deps.push_str(" build-essential");
