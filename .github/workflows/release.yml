@@ -58,7 +58,7 @@ jobs:
   build-mac:
     needs: discover
     if: ${{ inputs.mac }}
-    runs-on: [self-hosted, mac]
+    runs-on: [self-hosted, mac1]
     steps:
       - uses: actions/checkout@v6
       - uses: hilen/build/.github/actions/init@main
