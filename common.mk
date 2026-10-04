@@ -11,6 +11,15 @@ android:
 android-emu:
 	HILEN_ANDROID_ABI=arm64 rust ./build/build.rs android
 
+# An LG webOS TV. `webos-dist` builds the wasm dist an old TV browser can
+# load, `webos` also packs the hosted app, an .ipk that loads the dist from
+# the `url` of the [webos] table of hilen.toml. See hilen docs/webos.md.
+webos:
+	rust ./build/web/webos.rs
+
+webos-dist:
+	rust ./build/web/webos.rs --dist
+
 test:
 	cargo test --all
 	echo debug test: OK
