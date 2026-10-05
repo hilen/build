@@ -31,6 +31,33 @@ pub struct Release {
     pub mac_targets: Vec<String>,
     /// false for an app without the engine updater, its binaries are not signed
     pub self_update: bool,
+    /// the daemons of the app, each a bare signed binary per platform
+    pub daemons: Vec<Daemon>,
+}
+
+/// A second product of an app, a binary with no window that updates itself
+/// with `hilen-updater`, like a daemon. It ships as 1 signed bare binary per
+/// platform, no bundle, no installer, with its own manifest next to the
+/// app's. Named in `daemons` of the `[release]` table by its package name.
+pub struct Daemon {
+    /// cargo package name, the artifact file name prefix
+    pub name: String,
+    /// the binary target of that package, the file name cargo builds
+    pub bin: String,
+    pub version: String,
+}
+
+impl Daemon {
+    /// `banda-daemon-0.2.0-macos-universal` style names.
+    pub fn artifact(&self, suffix: &str) -> String {
+        format!("{}-{}-{suffix}", self.name, self.version)
+    }
+
+    /// The manifest file of this daemon, `<name>-updater.json` next to the
+    /// `updater.json` of the app.
+    pub fn manifest(&self) -> String {
+        format!("{}-updater.json", self.name)
+    }
 }
 
 impl Release {
@@ -76,6 +103,8 @@ struct Distribution {
     self_update: bool,
     #[serde(default = "universal")]
     mac_targets: Vec<String>,
+    #[serde(default)]
+    daemons: Vec<String>,
 }
 
 const DOWNLOAD_HOST: &str = "https://get.vladas.xyz";
@@ -115,51 +144,71 @@ pub fn read() -> Result<Release> {
 
     let metadata: Metadata =
         serde_json::from_str(&capture("cargo metadata --no-deps --format-version 1")?)?;
-    let package = metadata
-        .packages
-        .into_iter()
-        .find(|p| p.name == config.app_name)
-        .with_context(|| {
-            format!(
-                "no cargo package named {}, the project_name of hilen.toml",
-                config.app_name
-            )
-        })?;
-    let bins: Vec<String> = package
+    let release = hilen.release;
+    let daemons = release
+        .daemons
+        .iter()
+        .map(|name| {
+            let package = find_package(&metadata.packages, name)
+                .with_context(|| format!("no cargo package named {name}, listed in daemons of hilen.toml"))?;
+            Ok(Daemon {
+                name: package.name.clone(),
+                bin: pick_bin(package)?,
+                version: package.version.clone(),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let package = find_package(&metadata.packages, &config.app_name).with_context(|| {
+        format!(
+            "no cargo package named {}, the project_name of hilen.toml",
+            config.app_name
+        )
+    })?;
+    let bin = pick_bin(package)?;
+    let name = package.name.clone();
+    let version = package.version.clone();
+
+    Ok(Release {
+        daemons,
+        download_url: release.download_url.map_or_else(
+            || format!("{DOWNLOAD_HOST}/{name}"),
+            |url| url.trim_end_matches('/').to_string(),
+        ),
+        host_deployment: release.host_deployment.unwrap_or_else(|| DOWNLOAD_DEPLOYMENT.to_string()),
+        target_subdir: release.target_subdir.unwrap_or_else(|| name.clone()),
+        self_update: release.self_update,
+        mac_targets: release.mac_targets,
+        name,
+        bin,
+        version,
+        bundle_id: config.bundle_id,
+    })
+}
+
+fn find_package<'a>(packages: &'a [Package], name: &str) -> Option<&'a Package> {
+    packages.iter().find(|p| p.name == name)
+}
+
+/// A binary named like the package is the one to ship, side binaries such
+/// as a gallery are ignored. A lone binary under another name is it too, a
+/// workspace needs that when another crate owns the package name.
+fn pick_bin(package: &Package) -> Result<String> {
+    let bins: Vec<&str> = package
         .targets
-        .into_iter()
+        .iter()
         .filter(|t| t.kind.iter().any(|k| k == "bin"))
-        .map(|t| t.name)
+        .map(|t| t.name.as_str())
         .collect();
-    // A binary named like the package is the app, side binaries such as a
-    // gallery are ignored. A lone binary under another name is the app too,
-    // a workspace needs that when another crate owns the package name.
-    let bin = if bins.contains(&package.name) {
-        package.name.clone()
-    } else if bins.len() == 1 {
-        bins[0].clone()
+    if bins.contains(&package.name.as_str()) {
+        Ok(package.name.clone())
+    } else if let [only] = bins.as_slice() {
+        Ok((*only).to_string())
     } else {
         bail!(
             "cannot pick the binary of package {} to release, it has {}: {}",
             package.name,
             bins.len(),
             bins.join(", ")
-        );
-    };
-
-    let release = hilen.release;
-    Ok(Release {
-        download_url: release.download_url.map_or_else(
-            || format!("{DOWNLOAD_HOST}/{}", package.name),
-            |url| url.trim_end_matches('/').to_string(),
-        ),
-        host_deployment: release.host_deployment.unwrap_or_else(|| DOWNLOAD_DEPLOYMENT.to_string()),
-        target_subdir: release.target_subdir.unwrap_or_else(|| package.name.clone()),
-        self_update: release.self_update,
-        mac_targets: release.mac_targets,
-        name: package.name,
-        bin,
-        version: package.version,
-        bundle_id: config.bundle_id,
-    })
+        )
+    }
 }

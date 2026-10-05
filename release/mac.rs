@@ -8,6 +8,7 @@
 // the build so an unsigned release can never ship silently. Outputs in dist/:
 //   <name>-<v>-mac-<arch>.dmg      first install
 //   <name>-<v>-macos-<arch>        the bare binary the updater swaps in
+//   <daemon>-<v>-macos-<arch>      each daemon of `daemons`, bare and signed
 
 use anyhow::{Context, Result, bail};
 use shared::inspect;
@@ -73,6 +74,32 @@ fn main() -> Result<()> {
     std::fs::copy(&universal, &bare)?;
     r.sign(&[&bare])?;
     println!("built {bare}");
+
+    // A daemon is only the bare binary, signed with the identity so
+    // Gatekeeper lets it run, no bundle, no dmg and no notarization.
+    for daemon in &r.daemons {
+        for target in &r.mac_targets {
+            run(&format!(
+                "cargo build --locked --release -p {} --bin {} --target {target}",
+                daemon.name, daemon.bin
+            ))?;
+        }
+        let universal = format!("target/release/{}-{arch}", daemon.name);
+        let slices: Vec<String> = r
+            .mac_targets
+            .iter()
+            .map(|target| format!("target/{target}/release/{}", daemon.bin))
+            .collect();
+        run(&format!("lipo -create -output {universal} {}", slices.join(" ")))?;
+        inspect::refuse(&universal)?;
+        if let Some(identity) = &signing {
+            run(&format!(r#"codesign --force --options runtime --timestamp --sign "{identity}" "{universal}""#))?;
+        }
+        let bare = format!("dist/{}", daemon.artifact(&format!("macos-{arch}")));
+        std::fs::copy(&universal, &bare)?;
+        r.sign(&[&bare])?;
+        println!("built {bare}");
+    }
     Ok(())
 }
 

@@ -6,6 +6,7 @@
 //   <name>-<v>-linux-<arch>.deb        first install, updates through apt
 //   <name>-<v>-linux-<arch>.AppImage   signed, self updates in place
 //   <name>-<v>-linux-<triple-arch>     the bare binary, signed for the manifest
+//   <daemon>-<v>-linux-<triple-arch>   each daemon of `daemons`, bare and signed
 
 mod docker;
 
@@ -35,7 +36,7 @@ fn main() -> Result<()> {
 
     let image = format!("{}-linux-builder", r.name);
     docker::build_image(&image, "Dockerfile.linux", platform)?;
-    let script = format!(
+    let mut script = format!(
         r#"set -euo pipefail
 cargo build --locked --release -p {name} --bin {bin}
 BIN=target/release-linux/release/{bin}
@@ -51,6 +52,14 @@ cp $BIN $OUT/{name}"#,
         bin = r.bin,
         stage = STAGE
     );
+    // A daemon is only its bare binary, built in the same container.
+    for daemon in &r.daemons {
+        script.push_str(&format!(
+            "\ncargo build --locked --release -p {name} --bin {bin}\ncp target/release-linux/release/{bin} $OUT/{name}",
+            name = daemon.name,
+            bin = daemon.bin
+        ));
+    }
     docker::run_in(&r.name, &image, platform, "release-linux", "linux-stage", &script)?;
 
     let out = format!("{STAGE}/out");
@@ -65,6 +74,13 @@ cp $BIN $OUT/{name}"#,
     r.sign(&[&bare, &appimage])?;
     for f in [&deb, &appimage, &bare] {
         println!("built {f}");
+    }
+    for daemon in &r.daemons {
+        inspect::refuse(&format!("{out}/{}", daemon.name))?;
+        let bare = format!("dist/{}", daemon.artifact(&format!("linux-{rust_arch}")));
+        std::fs::copy(format!("{out}/{}", daemon.name), &bare)?;
+        r.sign(&[&bare])?;
+        println!("built {bare}");
     }
     Ok(())
 }

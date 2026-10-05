@@ -1,3 +1,10 @@
+          scp $SSH_OPTS dist/manifest.json uploader@$HOST:$DL/
+          # The app manifest and one per daemon, each only when its lane built something.
+          for f in dist/updater.json dist/*-updater.json; do
+            if [ -f "$f" ]; then
+              scp $SSH_OPTS "$f" uploader@$HOST:$DL/
+            fi
+          done
 name: release
 
 # The desktop release of a hilen app, called from the app's own release.yml
@@ -142,4 +149,9 @@ jobs:
           done
           rust build/release/manifest.rs --present dist/present.txt
           scp $SSH_OPTS dist/manifest.json uploader@$HOST:$DL/
-          [ -f dist/updater.json ] && scp $SSH_OPTS dist/updater.json uploader@$HOST:$DL/ || true
+          # The app manifest and one per daemon, each only when a lane built something.
+          for f in dist/updater.json dist/*-updater.json; do
+            if [ -f "$f" ]; then
+              scp $SSH_OPTS "$f" uploader@$HOST:$DL/
+            fi
+          done

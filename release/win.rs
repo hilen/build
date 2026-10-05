@@ -4,6 +4,7 @@
 // NSIS. `--arch x64|arm64`, default both. Outputs in dist/:
 //   <name>-<v>-windows-<arch>-setup.exe   first install
 //   <name>-<v>-windows-<arch>.exe         the bare exe the updater swaps in
+//   <daemon>-<v>-windows-<arch>.exe       each daemon of `daemons`, bare and signed
 
 mod docker;
 
@@ -51,12 +52,25 @@ cp /work/apps/app/target/release-win/{triple}/release/{bin}.exe /work/apps/app/{
             bin = r.bin,
             version = r.version
         ));
+        // A daemon is only its bare exe, no installer.
+        for daemon in &r.daemons {
+            script.push_str(&format!(
+                r#"cargo xwin build --locked --release -p {name} --bin {bin} --target {triple}
+cp /work/apps/app/target/release-win/{triple}/release/{bin}.exe /work/apps/app/{stage}/{name}-{arch}.exe
+"#,
+                name = daemon.name,
+                bin = daemon.bin
+            ));
+        }
     }
     docker::run_in(&r.name, &image, platform, "release-win", "win-stage", &script)?;
 
     // The setup exe packs this same exe, so a clean exe means a clean setup.
     for (arch, _) in &targets {
         inspect::refuse(&format!("{stage}/{}-{arch}.exe", r.name))?;
+        for daemon in &r.daemons {
+            inspect::refuse(&format!("{stage}/{}-{arch}.exe", daemon.name))?;
+        }
     }
     for (arch, _) in &targets {
         let setup = format!("dist/{}", r.artifact(&format!("windows-{arch}-setup.exe")));
@@ -66,6 +80,12 @@ cp /work/apps/app/target/release-win/{triple}/release/{bin}.exe /work/apps/app/{
         r.sign(&[&bare])?;
         println!("built {setup}");
         println!("built {bare}");
+        for daemon in &r.daemons {
+            let bare = format!("dist/{}", daemon.artifact(&format!("windows-{arch}.exe")));
+            std::fs::copy(format!("{stage}/{}-{arch}.exe", daemon.name), &bare)?;
+            r.sign(&[&bare])?;
+            println!("built {bare}");
+        }
     }
     Ok(())
 }

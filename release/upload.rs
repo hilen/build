@@ -30,12 +30,18 @@ fn main() -> Result<()> {
     );
     run(&format!(r#"ssh {host} "mkdir -p {dir}""#))?;
 
-    let prefix = format!("{}-{}-", r.name, r.version);
+    // The artifacts of this version, of the app and of each daemon, and the manifests.
+    let mut prefixes = vec![format!("{}-{}-", r.name, r.version)];
+    let mut manifests = vec!["manifest.json".to_string(), "updater.json".to_string()];
+    for daemon in &r.daemons {
+        prefixes.push(format!("{}-{}-", daemon.name, daemon.version));
+        manifests.push(daemon.manifest());
+    }
     let mut names: Vec<String> = std::fs::read_dir("dist")
         .context("dist/ missing, build a release first")?
         .filter_map(|e| e.ok())
         .map(|e| e.file_name().to_string_lossy().into_owned())
-        .filter(|n| n.starts_with(&prefix) || n == "manifest.json" || n == "updater.json")
+        .filter(|n| prefixes.iter().any(|p| n.starts_with(p)) || manifests.contains(n))
         .collect();
     names.sort();
     for name in &names {

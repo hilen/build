@@ -1,7 +1,8 @@
 #!/usr/bin/env rust
 
 // Emits dist/manifest.json for the website and dist/updater.json for the
-// engine updater. Presence comes from dist/ by default, or from a file
+// engine updater, plus dist/<daemon>-updater.json for each daemon of the
+// `daemons` list. Presence comes from dist/ by default, or from a file
 // listing the names on the download host with `--present <file>`, the CI
 // case where only the .meta.json sidecars were pulled back to the runner.
 
@@ -109,23 +110,47 @@ fn main() -> Result<()> {
     std::fs::write("dist/manifest.json", format!("{text}\n"))?;
     println!("{text}");
 
-    let updater = updater_manifest(&r, &has)?;
+    let appimages = [
+        ("linux-x86_64-appimage", "linux-x64.AppImage"),
+        ("linux-aarch64-appimage", "linux-aarch64.AppImage"),
+    ]
+    .map(|(key, suffix)| (key.to_string(), suffix.to_string()));
+    let entries: Vec<(String, String)> = bare_entries(&r)?.into_iter().chain(appimages).collect();
+    write_updater("updater.json", &r, &r.version, &entries, &has)?;
+
+    // A daemon is a bare binary on every platform, no AppImage.
+    for daemon in &r.daemons {
+        let has = |suffix: &str| -> Option<String> {
+            let name = daemon.artifact(suffix);
+            present.contains(&name).then_some(name)
+        };
+        write_updater(&daemon.manifest(), &r, &daemon.version, &bare_entries(&r)?, &has)?;
+    }
+    Ok(())
+}
+
+fn write_updater(
+    file: &str,
+    r: &Release,
+    version: &str,
+    entries: &[(String, String)],
+    has: &dyn Fn(&str) -> Option<String>,
+) -> Result<()> {
+    let updater = updater_manifest(r, version, entries, has)?;
     if updater.platforms.is_empty() {
-        eprintln!("warn: no signed update artifacts, skipping updater.json");
+        eprintln!("warn: no signed update artifacts, skipping {file}");
         return Ok(());
     }
     let text = serde_json::to_string_pretty(&updater)?;
-    std::fs::write("dist/updater.json", format!("{text}\n"))?;
+    std::fs::write(format!("dist/{file}"), format!("{text}\n"))?;
     println!("{text}");
     Ok(())
 }
 
+// The manifest key of each platform and the artifact suffix that serves it.
 // The mac binary serves every mac target it was built for, both keys when it
-// is universal. Linux gets the bare binary and the AppImage under its own
-// key, the engine picks by how the app runs. A deb install in /usr/bin is not
-// user writable, the engine offers it no update, those users update through
-// apt.
-fn updater_manifest(r: &Release, has: &dyn Fn(&str) -> Option<String>) -> Result<UpdaterManifest> {
+// is universal.
+fn bare_entries(r: &Release) -> Result<Vec<(String, String)>> {
     let mac = format!("macos-{}", r.mac_arch()?);
     // The cpu is the first word of a target, `aarch64-apple-darwin`.
     let mac_entries = r
@@ -138,21 +163,31 @@ fn updater_manifest(r: &Release, has: &dyn Fn(&str) -> Option<String>) -> Result
         ("windows-aarch64", "windows-arm64.exe"),
         ("linux-x86_64", "linux-x86_64"),
         ("linux-aarch64", "linux-aarch64"),
-        ("linux-x86_64-appimage", "linux-x64.AppImage"),
-        ("linux-aarch64-appimage", "linux-aarch64.AppImage"),
     ]
     .map(|(key, suffix)| (key.to_string(), suffix.to_string()));
+    Ok(mac_entries.chain(other_entries).collect())
+}
+
+// Linux gets the bare binary and the AppImage under its own key, the engine
+// picks by how the app runs. A deb install in /usr/bin is not user writable,
+// the engine offers it no update, those users update through apt.
+fn updater_manifest(
+    r: &Release,
+    version: &str,
+    entries: &[(String, String)],
+    has: &dyn Fn(&str) -> Option<String>,
+) -> Result<UpdaterManifest> {
     let mut platforms = BTreeMap::new();
-    for (key, suffix) in mac_entries.chain(other_entries) {
-        let Some(name) = has(&suffix) else { continue };
+    for (key, suffix) in entries {
+        let Some(name) = has(suffix) else { continue };
         let meta_path = format!("dist/{name}.meta.json");
         let Ok(text) = std::fs::read_to_string(&meta_path) else {
-            eprintln!("warn: {meta_path} missing, {key} left out of updater.json");
+            eprintln!("warn: {meta_path} missing, {key} left out of the manifest");
             continue;
         };
         let meta: Meta = serde_json::from_str(&text)?;
         platforms.insert(
-            key,
+            key.clone(),
             Platform {
                 url: format!("{}/{name}", r.download_url),
                 size: meta.size,
@@ -162,7 +197,7 @@ fn updater_manifest(r: &Release, has: &dyn Fn(&str) -> Option<String>) -> Result
         );
     }
     Ok(UpdaterManifest {
-        version: r.version.clone(),
+        version: version.to_string(),
         notes: String::new(),
         platforms,
     })
