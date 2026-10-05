@@ -3,8 +3,10 @@
 use std::fs::read_to_string;
 
 use anyhow::{Result, ensure};
-use shared::config;
-use shared::run::{capture, run};
+use shared::{
+    config, ios,
+    run::{capture, run},
+};
 
 // Gebling Games Studio Infisical project, holds the Apple upload secret
 const INFISICAL_PROJECT: &str = "e2dd64d9-130c-4072-bd3d-0a98331364cb";
@@ -32,12 +34,8 @@ fn main() -> Result<()> {
     println!("codesign identity:");
     run("security find-identity -p codesigning -v")?;
 
-    // Weak link the frameworks that carry modern data constants. On iOS 12 and
-    // 13 dyld binds a strong data symbol eagerly, so a constant the device lacks
-    // like kCGColorSpaceExtendedDisplayP3 or kSecUseDataProtectionKeychain kills
-    // the app before main. Weak linking makes the missing constant NULL instead.
-    // hilen-mobile regenerates the project with no OTHER_LDFLAGS, so set it here
-    // on the archive command so every TestFlight build keeps running on old iOS.
+    // hilen-mobile regenerates the project, so the linker flags are set here on
+    // the archive command, see shared::ios::LDFLAGS for what they are.
     //
     // allowProvisioningUpdates is needed here as well as on the export below.
     // Archive signs too, and it runs first, so a bundle id that has never been
@@ -46,9 +44,9 @@ fn main() -> Result<()> {
     run(&format!(
         "xcodebuild -project \"{}\".xcodeproj -scheme \"{}\" \
 -sdk iphoneos -configuration Release archive -archivePath \"{archive_path}\" \
-OTHER_LDFLAGS=\"-Wl,-weak_framework,CoreGraphics -Wl,-weak_framework,Security\" \
+OTHER_LDFLAGS=\"{}\" \
 -allowProvisioningUpdates",
-        config.project_name, config.project_name
+        config.project_name, config.project_name, ios::LDFLAGS
     ))?;
     println!("build: OK");
 

@@ -4,7 +4,7 @@ use std::fs::{read_to_string, write};
 
 use anyhow::{Result, ensure};
 use regex::Regex;
-use shared::{config, run::run};
+use shared::{config, ios, run::run};
 
 fn main() -> Result<()> {
     let config = config::read()?;
@@ -52,8 +52,9 @@ fn main() -> Result<()> {
     // when the platform is missing. The -sdk flag instead falls back to a Mac
     // Catalyst destination and dies at link time with an arch mismatch.
     run(&format!(
-        "xcodebuild -scheme {} -destination \"generic/platform=iOS Simulator\" build",
-        config.project_name
+        "xcodebuild -scheme {} -destination \"generic/platform=iOS Simulator\" OTHER_LDFLAGS=\"{}\" build",
+        config.project_name,
+        ios::LDFLAGS
     ))?;
     Ok(())
 }

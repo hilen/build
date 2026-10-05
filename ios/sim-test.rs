@@ -36,7 +36,7 @@ use std::{
 use anyhow::{Result, bail};
 use regex::Regex;
 use shared::{
-    config,
+    config, ios,
     run::{probe, run_quiet},
 };
 
@@ -139,8 +139,9 @@ cargo build -p {} --lib --target {SIM_TRIPLE} --release",
     run_quiet(&format!(
         "xcodebuild -project {xcodeproj} -target {} -configuration Release \
 -sdk iphonesimulator ARCHS=x86_64 VALID_ARCHS=x86_64 ONLY_ACTIVE_ARCH=NO \
-SYMROOT={symroot} build",
-        config.project_name
+SYMROOT={symroot} OTHER_LDFLAGS=\"{}\" build",
+        config.project_name,
+        ios::LDFLAGS
     ))?;
 
     let device = ensure_device()?;
