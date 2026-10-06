@@ -46,6 +46,13 @@ const RUNTIME: &str = "com.apple.CoreSimulator.SimRuntime.iOS-16-4";
 const RUNTIME_HINT: &str = "iOS 16.4";
 const SHUTDOWN_WAIT_SECONDS: u64 = 60;
 
+// The XCUITest of the mobile project that taps the screen and the keys of the
+// screen keyboard for a test, see `system_input` in the engine. It listens on
+// this port of the Mac, which the simulator shares.
+const SYSTEM_INPUT_SCHEME: &str = "SystemInput";
+const SYSTEM_INPUT_PORT: u16 = 47815;
+const HARDWARE_KEYBOARD: &str = "com.apple.iphonesimulator ConnectHardwareKeyboard";
+
 // A separate cargo target dir so this build never blocks on the desktop lane's
 // target lock, which is what lets the two lanes truly run in parallel. It sits
 // under target so the existing ignore of target contents already covers it.
@@ -128,9 +135,9 @@ cargo build -p {} --lib --target {SIM_TRIPLE} --release",
     ))?;
 
     // The generated project is gitignored, so regenerate it only when it is
-    // missing, not on every run. Regenerating wipes the device only weak
-    // framework flags.
-    if !std::path::Path::new(&xcodeproj).exists() {
+    // missing or older than the system input helper, not on every run.
+    let helper_scheme = format!("{xcodeproj}/xcshareddata/xcschemes/{SYSTEM_INPUT_SCHEME}.xcscheme");
+    if !std::path::Path::new(&helper_scheme).exists() {
         run_quiet("cargo install hilen-mobile --locked")?;
         run_quiet("hilen-mobile")?;
     }
@@ -146,6 +153,22 @@ SYMROOT={symroot} OTHER_LDFLAGS=\"{}\" build",
 
     let device = ensure_device()?;
 
+    let helper_data = format!("{}/{IOS_TARGET_DIR}/system-input", std::env::current_dir()?.display());
+    let helper_build = format!(
+        "-project {xcodeproj} -scheme {SYSTEM_INPUT_SCHEME} -destination \"platform=iOS \
+Simulator,id={device}\" -derivedDataPath {helper_data}"
+    );
+
+    step("building the system input helper");
+    run_quiet(&format!("xcodebuild build-for-testing {helper_build}"))?;
+
+    // With a hardware keyboard connected the simulator shows no screen
+    // keyboard, and the keyboard tests have no keys to tap. The setting is
+    // read when Simulator starts, and put back after the run.
+    let hardware_keyboard = probe(&format!("defaults read {HARDWARE_KEYBOARD}"));
+    probe("osascript -e 'tell application \"Simulator\" to quit'");
+    run_quiet(&format!("defaults write {HARDWARE_KEYBOARD} -bool false"))?;
+
     step(&format!("booting {DEVICE_NAME}"));
     boot_device(&device)?;
     run_quiet("open -a Simulator")?;
@@ -157,6 +180,16 @@ SYMROOT={symroot} OTHER_LDFLAGS=\"{}\" build",
 
     // simctl passes only SIMCTL_CHILD_ prefixed variables into the app, so the
     // narrowing list and the human flag are forwarded under that prefix.
+    let helper_log = format!("{IOS_TARGET_DIR}/system-input.log");
+    let mut helper = Command::new("sh")
+        .arg("-c")
+        .arg(format!(
+            "TEST_RUNNER_HILEN_BUNDLE_ID={} TEST_RUNNER_HILEN_SYSTEM_INPUT_PORT={SYSTEM_INPUT_PORT} exec \
+xcodebuild test-without-building {helper_build} > {helper_log} 2>&1",
+            config.bundle_id
+        ))
+        .spawn()?;
+
     let mut env = String::from(if present {
         "SIMCTL_CHILD_HILEN_PRESENT=1"
     } else {
@@ -168,6 +201,9 @@ SYMROOT={symroot} OTHER_LDFLAGS=\"{}\" build",
     if human {
         env.push_str(" SIMCTL_CHILD_HILEN_HUMAN=1");
     }
+    env.push_str(&format!(
+        " SIMCTL_CHILD_HILEN_SYSTEM_INPUT=127.0.0.1:{SYSTEM_INPUT_PORT}"
+    ));
 
     let launch = format!(
         "{env} xcrun simctl launch --console --terminate-running-process {device} {}",
@@ -184,8 +220,22 @@ SYMROOT={symroot} OTHER_LDFLAGS=\"{}\" build",
         stream(&launch)?
     };
 
+    // The helper serves until it is stopped, the app is its only client.
+    helper.kill()?;
+    helper.wait()?;
+
     run_quiet(&format!("xcrun simctl shutdown {device} || true"))?;
     probe("osascript -e 'tell application \"Simulator\" to quit'");
+    match hardware_keyboard.trim() {
+        "0" => {}
+        "1" => {
+            run_quiet(&format!("defaults write {HARDWARE_KEYBOARD} -bool true"))?;
+        }
+        // It was never set, which reads as an error text.
+        _ => {
+            run_quiet(&format!("defaults delete {HARDWARE_KEYBOARD}"))?;
+        }
+    }
 
     if present {
         return Ok(());
