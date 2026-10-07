@@ -1,10 +1,9 @@
 name: upload
-description: Copies every file in dist/ to the download host over Tailscale.
+description: Sends every file in dist/ to the download folder of the app through the upload door of beekeeper.
 
 inputs:
-  host:
-    required: true
-  dl-dir:
+  infisical_project:
+    description: The Infisical project of the app, it holds UPLOAD_TOKEN.
     required: true
 
 runs:
@@ -13,8 +12,5 @@ runs:
     - shell: bash
       run: |
         set -euo pipefail
-        SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
         # The checkout wipes dist/, so it holds only what this job built.
-        for f in dist/*; do
-          scp $SSH_OPTS "$f" uploader@${{ inputs.host }}:${{ inputs.dl-dir }}/
-        done
+        bash build/release/with-secrets.sh "${{ inputs.infisical_project }}" -- bash build/release/door.sh put dist/*
