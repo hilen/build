@@ -4,7 +4,10 @@ use std::fs::{read_to_string, write};
 
 use anyhow::{Result, ensure};
 use regex::Regex;
-use shared::{config, ios, run::run};
+use shared::{
+    config, ios,
+    run::{has, run},
+};
 
 fn main() -> Result<()> {
     let config = config::read()?;
@@ -16,7 +19,15 @@ fn main() -> Result<()> {
         std::env::remove_var("CXXFLAGS");
     }
 
-    run("cargo install hilen-mobile --locked")?;
+    if has("cargo") {
+        run("cargo install hilen-mobile --locked")?;
+    } else {
+        // A machine with no Rust toolchain gets the generator ready built.
+        ensure!(
+            has("hilen-mobile"),
+            "hilen-mobile is not installed and this machine has no cargo to install it"
+        );
+    }
 
     let args: Vec<String> = std::env::args().skip(1).collect();
     run(format!("hilen-mobile {}", args.join(" ")).trim())?;
@@ -31,10 +42,22 @@ fn main() -> Result<()> {
         "generated Xcode project has no iOS deployment target"
     );
     let setting = format!("IPHONEOS_DEPLOYMENT_TARGET = {};", config.ios_minimum_version);
-    write(
-        &project_path,
-        target.replace_all(&project, setting.as_str()).as_bytes(),
-    )?;
+    let mut project = target.replace_all(&project, setting.as_str()).to_string();
+    if !has("cargo") {
+        // The template has a build phase that runs `~/.cargo/bin/cargo lipo`
+        // on archive. With no cargo here the archive would stop there. The lib
+        // is already built and fresh, build-lib.rs ran above, so the phase is
+        // emptied.
+        let phase = Regex::new("shellScript = \"[^\"]*cargo lipo[^\"]*\";")?;
+        ensure!(
+            phase.is_match(&project),
+            "generated Xcode project has no cargo lipo build phase to turn off"
+        );
+        project = phase
+            .replace_all(&project, "shellScript = \"true\\n\";")
+            .to_string();
+    }
+    write(&project_path, project.as_bytes())?;
 
     // hilen-mobile bakes CFBundleShortVersionString 1.0 into the generated
     // Info.plist with no knob, so set the real version before the archive reads

@@ -25,6 +25,18 @@ fn shell(cmd: &str) -> Command {
     c
 }
 
+/// Whether a program is on the path. A machine with no Rust toolchain has no
+/// cargo, its builds run on another machine through far.
+pub fn has(program: &str) -> bool {
+    let finder = if cfg!(windows) { "where" } else { "command -v" };
+    shell(&format!("{finder} {program}"))
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
 /// Echo the command, run it inheriting the terminal, and fail on a non zero exit.
 pub fn run(cmd: &str) -> Result<()> {
     println!("{cmd}");
