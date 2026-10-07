@@ -69,6 +69,3 @@ release-linux:
 
 manifest:
 	rust ./build/release/manifest.rs
-
-upload:
-	rust ./build/release/upload.rs

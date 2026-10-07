@@ -7,8 +7,9 @@
 #   door.sh get <name> <folder>        fetch one file into a local folder
 #
 # UPLOAD_TOKEN is in the Infisical project of the app, so call this through
-# with-secrets.sh. The door is on the home LAN, UPLOAD_DOOR names another
-# address. A CI runner has no login on any node, the door is its only way in.
+# with-secrets.sh. The door is on the tailnet address of beekeeper, over HTTPS,
+# UPLOAD_DOOR names another address. A CI runner has no login on any node and
+# reaches nothing else of beekeeper, the door is its only way in.
 set -euo pipefail
 
 : "${UPLOAD_TOKEN:?UPLOAD_TOKEN is not set, it lives in the Infisical project of the app}"
@@ -16,7 +17,7 @@ set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 # release::read prints the cargo command it runs first, the name is the last line.
 grant="$(rust "$here/grant.rs" | tail -n 1)"
-url="${UPLOAD_DOOR:-http://192.168.0.101:8191}/upload/$grant"
+url="${UPLOAD_DOOR:-https://beekeeper.tailf87cbe.ts.net}/upload/$grant"
 
 # The token reaches curl in a config on stdin, so it never shows in a
 # process list.
