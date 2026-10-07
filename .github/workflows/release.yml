@@ -63,7 +63,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: hilen/build/.github/actions/init@main
       - shell: bash
-        run: bash build/release/with-secrets.sh $APP_PROJECT_ID -- rust build/release/linux.rs --arch=${{ matrix.arch }}
+        run: bash build/release/with-secrets.sh $APP_PROJECT_ID -- bash build/release/vm.sh rust build/release/linux.rs --arch=${{ matrix.arch }}
       - uses: ./build/.github/actions/upload
         with:
           infisical_project: ${{ inputs.infisical_project }}
