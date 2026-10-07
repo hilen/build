@@ -5,6 +5,11 @@ ios:
 ios-lib:
 	rust ./build/ios/build-lib.rs
 
+# Hot reload in the iOS simulator of this Mac: a saved file shows in the
+# running app with no install and no restart. See hilen docs/hot-reload.md.
+hot:
+	rust ./build/ios/hot.rs
+
 android:
 	rust ./build/build.rs android
 

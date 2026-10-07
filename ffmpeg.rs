@@ -2,8 +2,9 @@
 
 // Builds the static ffmpeg libraries hilen links for video playback, see
 // docs/video.md in hilen. Run once per target. With no argument it builds
-// for the host. On a Mac `aarch64-apple-ios` cross builds for an iPhone and
-// `x86_64-apple-ios` for the simulator. The archive in dist/ goes to a
+// for the host. On a Mac `aarch64-apple-ios` cross builds for an iPhone,
+// `x86_64-apple-ios` for the simulator and `aarch64-apple-ios-sim` for the
+// simulator of an Apple Silicon Mac. The archive in dist/ goes to a
 // release of this repo and the forked ffmpeg-sys-next downloads it from there, so a
 // normal build never compiles ffmpeg. The configure flags mirror what the
 // ffmpeg-sys-next `build` feature passes, minus debug info, so a locally
@@ -51,7 +52,18 @@ fn cross_for(triple: &str) -> Result<Cross> {
             version_min: format!("-mios-simulator-version-min={IOS_MINIMUM}"),
             assembly:    false,
         },
-        _ => bail!("no cross build for {triple}, only aarch64-apple-ios and x86_64-apple-ios"),
+        // The simulator of an Apple Silicon Mac, for a hot build, see
+        // docs/hot-reload.md in hilen. No arm64 simulator is older than iOS 14.
+        "aarch64-apple-ios-sim" => Cross {
+            arch:        "arm64",
+            cpu_family:  "aarch64",
+            sdk:         "iphonesimulator",
+            version_min: "-mios-simulator-version-min=14.0".to_string(),
+            assembly:    true,
+        },
+        _ => bail!(
+            "no cross build for {triple}, only aarch64-apple-ios, aarch64-apple-ios-sim and x86_64-apple-ios"
+        ),
     })
 }
 
