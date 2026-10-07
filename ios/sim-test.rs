@@ -53,11 +53,32 @@ const SYSTEM_INPUT_SCHEME: &str = "SystemInput";
 const SYSTEM_INPUT_PORT: u16 = 47815;
 const HARDWARE_KEYBOARD: &str = "com.apple.iphonesimulator ConnectHardwareKeyboard";
 
+// far runs this lane on a build machine that many sessions share, see far.md
+// in the comb repo. It gives each job an id and 100 ports of its own. With the
+// one device name and the one port, 2 sessions at once would install into the
+// same device and the second helper would not get the port.
+const FAR_JOB: &str = "FAR_JOB";
+const FAR_PORT: &str = "FAR_PORT";
+
 // A separate cargo target dir so this build never blocks on the desktop lane's
 // target lock, which is what lets the two lanes truly run in parallel. It sits
 // under target so the existing ignore of target contents already covers it.
 const IOS_TARGET_DIR: &str = "target/ios";
 const SIM_TRIPLE: &str = "x86_64-apple-ios";
+
+fn device_name() -> String {
+    match std::env::var(FAR_JOB) {
+        Ok(job) => format!("{DEVICE_NAME}-{job}"),
+        Err(_) => DEVICE_NAME.to_string(),
+    }
+}
+
+fn system_input_port() -> Result<u16> {
+    match std::env::var(FAR_PORT) {
+        Ok(port) => Ok(port.parse()?),
+        Err(_) => Ok(SYSTEM_INPUT_PORT),
+    }
+}
 
 fn step(message: &str) {
     println!("\n[ios] {message}");
@@ -96,6 +117,11 @@ fn main() -> Result<()> {
     }
 
     let config = config::read()?;
+    let device_name = device_name();
+    let system_input_port = system_input_port()?;
+    // A far job has no desktop session, so there is no Simulator app to open
+    // and no hardware keyboard to take away. The device runs without a window.
+    let desktop = std::env::var(FAR_JOB).is_err();
 
     // `--human` is the simulator spelling of the desktop `--human`. The app
     // holds after every check and every test until a tap on the screen.
@@ -151,7 +177,7 @@ SYMROOT={symroot} OTHER_LDFLAGS=\"{}\" build",
         ios::LDFLAGS
     ))?;
 
-    let device = ensure_device()?;
+    let device = ensure_device(&device_name)?;
 
     let helper_data = format!("{}/{IOS_TARGET_DIR}/system-input", std::env::current_dir()?.display());
     let helper_build = format!(
@@ -166,12 +192,16 @@ Simulator,id={device}\" -derivedDataPath {helper_data}"
     // keyboard, and the keyboard tests have no keys to tap. The setting is
     // read when Simulator starts, and put back after the run.
     let hardware_keyboard = probe(&format!("defaults read {HARDWARE_KEYBOARD}"));
-    probe("osascript -e 'tell application \"Simulator\" to quit'");
-    run_quiet(&format!("defaults write {HARDWARE_KEYBOARD} -bool false"))?;
+    if desktop {
+        probe("osascript -e 'tell application \"Simulator\" to quit'");
+        run_quiet(&format!("defaults write {HARDWARE_KEYBOARD} -bool false"))?;
+    }
 
-    step(&format!("booting {DEVICE_NAME}"));
-    boot_device(&device)?;
-    run_quiet("open -a Simulator")?;
+    step(&format!("booting {device_name}"));
+    boot_device(&device, &device_name)?;
+    if desktop {
+        run_quiet("open -a Simulator")?;
+    }
     run_quiet(&format!("xcrun simctl install {device} \"{app}\""))?;
 
     // HILEN_RUN_TESTS makes the app run the suite and exit. --console streams its
@@ -184,7 +214,7 @@ Simulator,id={device}\" -derivedDataPath {helper_data}"
     let mut helper = Command::new("sh")
         .arg("-c")
         .arg(format!(
-            "TEST_RUNNER_HILEN_BUNDLE_ID={} TEST_RUNNER_HILEN_SYSTEM_INPUT_PORT={SYSTEM_INPUT_PORT} exec \
+            "TEST_RUNNER_HILEN_BUNDLE_ID={} TEST_RUNNER_HILEN_SYSTEM_INPUT_PORT={system_input_port} exec \
 xcodebuild test-without-building {helper_build} > {helper_log} 2>&1",
             config.bundle_id
         ))
@@ -202,7 +232,7 @@ xcodebuild test-without-building {helper_build} > {helper_log} 2>&1",
         env.push_str(" SIMCTL_CHILD_HILEN_HUMAN=1");
     }
     env.push_str(&format!(
-        " SIMCTL_CHILD_HILEN_SYSTEM_INPUT=127.0.0.1:{SYSTEM_INPUT_PORT}"
+        " SIMCTL_CHILD_HILEN_SYSTEM_INPUT=127.0.0.1:{system_input_port}"
     ));
 
     let launch = format!(
@@ -225,16 +255,21 @@ xcodebuild test-without-building {helper_build} > {helper_log} 2>&1",
     helper.wait()?;
 
     run_quiet(&format!("xcrun simctl shutdown {device} || true"))?;
-    probe("osascript -e 'tell application \"Simulator\" to quit'");
-    match hardware_keyboard.trim() {
-        "0" => {}
-        "1" => {
-            run_quiet(&format!("defaults write {HARDWARE_KEYBOARD} -bool true"))?;
+    if desktop {
+        probe("osascript -e 'tell application \"Simulator\" to quit'");
+        match hardware_keyboard.trim() {
+            "0" => {}
+            "1" => {
+                run_quiet(&format!("defaults write {HARDWARE_KEYBOARD} -bool true"))?;
+            }
+            // It was never set, which reads as an error text.
+            _ => {
+                run_quiet(&format!("defaults delete {HARDWARE_KEYBOARD}"))?;
+            }
         }
-        // It was never set, which reads as an error text.
-        _ => {
-            run_quiet(&format!("defaults delete {HARDWARE_KEYBOARD}"))?;
-        }
+    } else {
+        // The device has the name of this job, no later run finds it again.
+        run_quiet(&format!("xcrun simctl delete {device}"))?;
     }
 
     if present {
@@ -260,24 +295,24 @@ xcodebuild test-without-building {helper_build} > {helper_log} 2>&1",
     Ok(())
 }
 
-fn boot_device(device: &str) -> Result<()> {
+fn boot_device(device: &str, name: &str) -> Result<()> {
     for elapsed in 0..SHUTDOWN_WAIT_SECONDS {
-        let state = probe(&format!("xcrun simctl list devices | grep \"{DEVICE_NAME} (\""));
+        let state = probe(&format!("xcrun simctl list devices | grep \"{name} (\""));
         if !state.contains("(Shutting Down)") {
             run_quiet(&format!("xcrun simctl bootstatus {device} -b"))?;
             return Ok(());
         }
         if elapsed == 0 {
-            step(&format!("waiting for {DEVICE_NAME} to finish shutting down"));
+            step(&format!("waiting for {name} to finish shutting down"));
         }
         sleep(Duration::from_secs(1));
     }
 
-    bail!("{DEVICE_NAME} did not finish shutting down within {SHUTDOWN_WAIT_SECONDS} seconds")
+    bail!("{name} did not finish shutting down within {SHUTDOWN_WAIT_SECONDS} seconds")
 }
 
-fn ensure_device() -> Result<String> {
-    let existing = probe(&format!("xcrun simctl list devices | grep \"{DEVICE_NAME} (\""));
+fn ensure_device(name: &str) -> Result<String> {
+    let existing = probe(&format!("xcrun simctl list devices | grep \"{name} (\""));
     let id = Regex::new(r"\(([0-9A-F-]{36})\)")?;
     if let Some(caps) = id.captures(&existing) {
         return Ok(caps[1].to_string());
@@ -291,7 +326,7 @@ created. Install it before running the iOS test lane."
     }
 
     let created = run_quiet(&format!(
-        "xcrun simctl create \"{DEVICE_NAME}\" {DEVICE_TYPE} {RUNTIME}"
+        "xcrun simctl create \"{name}\" {DEVICE_TYPE} {RUNTIME}"
     ))?;
     let created = created.trim().to_string();
     if created.is_empty() {
