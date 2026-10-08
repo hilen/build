@@ -28,7 +28,7 @@ fn main() -> Result<()> {
     step("building the library");
     hot.prepare()?;
     let library = hot.build_library(&config.app_name, "")?;
-    hot.publish(&library)?;
+    hot.publish(&library, None)?;
 
     step("building the loader");
     let loader = hot.build_loader()?;
@@ -50,7 +50,7 @@ fn main() -> Result<()> {
         let started = Instant::now();
         match hot.build_library(&config.app_name, "") {
             Ok(library) => {
-                let name = hot.publish(&library)?;
+                let name = hot.publish(&library, None)?;
                 step(&format!("{name} is out after {:.1} s", started.elapsed().as_secs_f32()));
             }
             // The loader has no new file to load, the app keeps its code.

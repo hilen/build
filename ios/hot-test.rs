@@ -69,7 +69,7 @@ fn main() -> Result<()> {
     let loader = hot.build_loader()?;
 
     step("starting the first library");
-    hot.publish(first)?;
+    hot.publish(first, None)?;
     let device = hot.device()?;
     let result = swap(&hot, &device, &loader, first, second);
     hot.release_device(&device);
@@ -88,7 +88,7 @@ fn swap(hot: &Hot, device: &str, loader: &Path, first: &Path, second: &Path) -> 
             (&FIRST, first)
         };
         step(&format!("reload {reload}, the {} library", build.name));
-        hot.publish(library)?;
+        hot.publish(library, None)?;
         check(hot, device, pid, build)?;
         threads.push(thread_count(pid)?);
     }

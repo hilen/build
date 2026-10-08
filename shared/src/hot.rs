@@ -20,7 +20,7 @@ use serde::Deserialize;
 
 use crate::{
     config::Config,
-    run::{capture, probe, run, run_allow_fail},
+    run::{capture, probe, run, run_allow_fail, run_quiet},
 };
 
 /// The simulator of an Apple Silicon Mac. No Rosetta, which keeps a
@@ -33,6 +33,15 @@ const HOT_FLAG: &str = r#"--config 'build.rustflags=["--cfg","hilen_hot"]'"#;
 /// The folder of the libraries and the pointer file, below the repo root.
 const HOT_DIR: &str = "target/hot/lib";
 const POINTER: &str = "current";
+/// The loader writes the name of the library it started into this file.
+const STARTED: &str = "started";
+/// The source an app takes the engine from. A library that must carry the
+/// engine of a folder on disk is built with this source pointed there.
+const ENGINE_GIT: &str = "https://github.com/hilen/hilen.git";
+/// The lock file of an app is put aside here while the engine of a folder is
+/// built in, so the build leaves the repo of the app as it was.
+const KEPT_LOCK: &str = "target/hot-Cargo.lock";
+const STARTED_TRIES: usize = 240;
 /// The running app has the newest library mapped and loads the next one
 /// before it lets go, so 2 files are in use at most.
 const LIBRARIES_KEPT: usize = 3;
@@ -65,6 +74,11 @@ pub struct Hot {
     /// The name of the loader app and of its executable.
     executable: String,
     bundle_id:  String,
+    /// The folder of the libraries and the pointer file.
+    dir:        PathBuf,
+    /// The repo of an engine on disk that the library is built with, in
+    /// place of the engine the app names.
+    engine:     Option<PathBuf>,
 }
 
 impl Hot {
@@ -75,32 +89,69 @@ impl Hot {
     /// `bundle_id` is a name of its own, so the loader does not replace the
     /// normal app in the simulator.
     pub fn named(executable: &str, bundle_id: &str) -> Result<Self> {
+        Ok(Self::at(&std::env::current_dir()?, executable, bundle_id))
+    }
+
+    /// Like `named`, for the repo at `root` in place of the current folder.
+    pub fn at(root: &Path, executable: &str, bundle_id: &str) -> Self {
         // Inside a far job this machine is the builder already.
         let on_builder = std::env::var(FAR_JOB).is_ok();
-        Ok(Self {
+        Self {
             far:        !on_builder && !probe("command -v far").trim().is_empty(),
-            root:       std::env::current_dir()?,
+            root:       root.to_path_buf(),
             executable: executable.to_string(),
             bundle_id:  bundle_id.to_string(),
-        })
+            dir:        root.join(HOT_DIR),
+            engine:     None,
+        }
+    }
+
+    /// Another folder for the libraries, below the repo root.
+    #[must_use]
+    pub fn with_dir(mut self, dir: &str) -> Self {
+        self.dir = self.root.join(dir);
+        self
+    }
+
+    /// The library is built with the engine of the repo at `engine`.
+    #[must_use]
+    pub fn with_engine(mut self, engine: &Path) -> Self {
+        self.engine = Some(engine.to_path_buf());
+        self
     }
 
     pub fn bundle_id(&self) -> &str {
         &self.bundle_id
     }
 
-    /// A shell line on the machine that builds.
+    /// A shell line in the repo, on this machine.
+    fn in_root(&self, line: &str) -> String {
+        format!("cd \"{}\" && {line}", self.root.display())
+    }
+
+    /// A shell line in the repo, on the machine that builds.
     fn on_builder(&self, line: &str) -> String {
         if self.far {
-            format!("far '{}'", line.replace('\'', r"'\''"))
+            self.in_root(&format!("far '{}'", line.replace('\'', r"'\''")))
         } else {
-            line.to_string()
+            self.in_root(line)
         }
     }
 
     fn fetch(&self, path: &str) -> Result<()> {
         if self.far {
-            run(&format!("far get {path}"))?;
+            run(&self.in_root(&format!("far get {path}")))?;
+        }
+        Ok(())
+    }
+
+    /// The builder gets the engine folder as it is here now. A job of the
+    /// app sends only the repo of the app.
+    fn send_engine(&self) -> Result<()> {
+        if let Some(engine) = &self.engine
+            && self.far
+        {
+            run(&format!("cd \"{}\" && far true", engine.display()))?;
         }
         Ok(())
     }
@@ -112,10 +163,25 @@ impl Hot {
     /// Builds `package` as 1 dynamic library with the engine inside and
     /// brings it here. `features` are more cargo features of the package.
     pub fn build_library(&self, package: &str, features: &str) -> Result<PathBuf> {
-        let line = format!(
-            "export CFLAGS= SDKROOT= IPHONEOS_DEPLOYMENT_TARGET={IOS_MINIMUM}; \
-cargo rustc -p {package} --lib --target {TARGET} --crate-type cdylib --features hilen/hot{features} {HOT_FLAG}"
+        let exports = format!("export CFLAGS= SDKROOT= IPHONEOS_DEPLOYMENT_TARGET={IOS_MINIMUM}");
+        let cargo = format!(
+            "cargo rustc -p {package} --lib --target {TARGET} --crate-type cdylib --features hilen/hot{features} {HOT_FLAG}"
         );
+        let line = match &self.engine {
+            Some(engine) => {
+                // The same relative path is right on the builder, far keeps
+                // the folders as they lie here.
+                let path = relative(&self.root, &engine.join("hilen"));
+                let path = path.display();
+                let patch = format!(r#"--config 'patch."{ENGINE_GIT}".hilen.path="{path}"'"#);
+                // The new source of the engine changes the lock file.
+                let keep = format!("mkdir -p target && cp Cargo.lock {KEPT_LOCK}");
+                let restore = format!("status=$?; cp {KEPT_LOCK} Cargo.lock; exit $status");
+                format!("{exports}; {keep} && {cargo} {patch}; {restore}")
+            }
+            None => format!("{exports}; {cargo}"),
+        };
+        self.send_engine()?;
         run(&self.on_builder(&line))?;
 
         let library = format!("target/{TARGET}/debug/lib{}.dylib", package.replace('-', "_"));
@@ -160,13 +226,14 @@ codesign -s - --force {app}"
     }
 
     pub fn dir(&self) -> PathBuf {
-        self.root.join(HOT_DIR)
+        self.dir.clone()
     }
 
     /// Puts a built library into the hot folder under a new name and points
     /// the loader at it. The library is whole before the pointer changes,
-    /// and the pointer changes with 1 rename.
-    pub fn publish(&self, library: &Path) -> Result<String> {
+    /// and the pointer changes with 1 rename. `assets` is the folder that
+    /// holds the `assets` of the app, when they are not in the loader app.
+    pub fn publish(&self, library: &Path, assets: Option<&Path>) -> Result<String> {
         let dir = self.dir();
         create_dir_all(&dir)?;
 
@@ -175,7 +242,11 @@ codesign -s - --force {app}"
         copy(library, dir.join(&name)).with_context(|| format!("no library at {}", library.display()))?;
 
         let pending = dir.join("current.new");
-        write(&pending, &name)?;
+        let pointer = match assets {
+            Some(assets) => format!("{name}\n{}", assets.display()),
+            None => name.clone(),
+        };
+        write(&pending, pointer)?;
         rename(&pending, dir.join(POINTER))?;
 
         self.drop_old_libraries(&dir)?;
@@ -263,6 +334,20 @@ codesign -s - --force {app}"
         bail!("the app did not start `{text}`, its marker says `{}`", last.trim())
     }
 
+    /// Waits until the loader says that it started the library `name`.
+    pub fn wait_for_start(&self, name: &str) -> Result<()> {
+        let started = self.dir.join(STARTED);
+        let mut last = String::new();
+        for _ in 0..STARTED_TRIES {
+            last = read_to_string(&started).unwrap_or_default();
+            if last.trim() == name {
+                return Ok(());
+            }
+            sleep(MARKER_POLL);
+        }
+        bail!("the loader did not start {name}, it runs `{}`", last.trim())
+    }
+
     /// Changes when a source file is saved, added or removed.
     pub fn sources(&self) -> Result<(usize, SystemTime)> {
         let mut state = (0, UNIX_EPOCH);
@@ -275,7 +360,7 @@ codesign -s - --force {app}"
 pub fn screen_color(device: &str) -> Result<(u8, u8, u8)> {
     let file = std::env::temp_dir().join(format!("hilen-hot-{device}.bmp"));
     let file_text = file.display();
-    crate::run::run_quiet(&format!("xcrun simctl io {device} screenshot --type=bmp \"{file_text}\""))?;
+    run_quiet(&format!("xcrun simctl io {device} screenshot --type=bmp \"{file_text}\""))?;
     middle_of_bmp(&read(&file)?)
 }
 
@@ -298,8 +383,20 @@ fn middle_of_bmp(bytes: &[u8]) -> Result<(u8, u8, u8)> {
 }
 
 pub fn thread_count(pid: u32) -> Result<usize> {
-    let threads = capture(&format!("ps -M {pid}"))?;
+    let threads = run_quiet(&format!("ps -M {pid}"))?;
     Ok(threads.lines().count().saturating_sub(1))
+}
+
+/// The memory the process holds, in MB.
+pub fn memory_mb(pid: u32) -> Result<u64> {
+    let kilobytes = run_quiet(&format!("ps -o rss= -p {pid}"))?;
+    let kilobytes: u64 = kilobytes.trim().parse().with_context(|| format!("no memory size in `{kilobytes}`"))?;
+    Ok(kilobytes / 1024)
+}
+
+pub fn open_files(pid: u32) -> Result<usize> {
+    let files = run_quiet(&format!("lsof -p {pid}"))?;
+    Ok(files.lines().count().saturating_sub(1))
 }
 
 pub fn is_alive(pid: u32) -> bool {
@@ -313,6 +410,21 @@ fn first_device(list: &str) -> Option<String> {
         let is_id = id.len() == 36 && id.chars().all(|c| c.is_ascii_hexdigit() || c == '-');
         is_id.then(|| id.to_string())
     })
+}
+
+/// The path from the folder `from` to `to`, both full paths.
+fn relative(from: &Path, to: &Path) -> PathBuf {
+    let from: Vec<_> = from.components().collect();
+    let to: Vec<_> = to.components().collect();
+    let shared = from.iter().zip(&to).take_while(|(a, b)| a == b).count();
+    let mut path = PathBuf::new();
+    for _ in shared..from.len() {
+        path.push("..");
+    }
+    for part in &to[shared..] {
+        path.push(part);
+    }
+    path
 }
 
 fn walk(dir: &Path, state: &mut (usize, SystemTime)) -> Result<()> {
@@ -351,6 +463,12 @@ mod tests {
         bmp[middle..middle + 3].copy_from_slice(&[10, 20, 30]);
         assert_eq!(middle_of_bmp(&bmp)?, (30, 20, 10));
         Ok(())
+    }
+
+    #[test]
+    fn the_engine_folder_is_named_from_the_repo_of_an_app() {
+        let path = relative(Path::new("/dev/apps/skaityk"), Path::new("/dev/hilen/hilen"));
+        assert_eq!(path, Path::new("../../hilen/hilen"));
     }
 
     #[test]

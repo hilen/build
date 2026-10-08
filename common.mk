@@ -10,6 +10,12 @@ ios-lib:
 hot:
 	rust ./build/ios/hot.rs
 
+# 1 loader in the iOS simulator that swaps between several apps, on a command:
+# make swap args="start demo ../apps/skaityk", then args="to skaityk",
+# args="status" and args="stop". See hilen docs/hot-reload.md.
+swap:
+	rust ./build/ios/swap.rs $(args)
+
 android:
 	rust ./build/build.rs android
 
