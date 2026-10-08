@@ -21,7 +21,8 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    hot::{Hot, is_alive, memory_mb, open_files, thread_count},
+    config,
+    hot::{Hot, is_alive, memory_mb, open_files, phone, sign_library, thread_count},
     run::{run, run_allow_fail},
 };
 
@@ -34,6 +35,10 @@ const PROJECT_FILE: &str = "hilen.toml";
 /// An app that just started still draws its first frames and loads its
 /// first data, the numbers of the process are read after that.
 const SETTLE: Duration = Duration::from_secs(3);
+/// The name of the loader app on a phone.
+const PHONE_EXECUTABLE: &str = "Hilen";
+/// The inspect tool sends a library to the phone, it has to run on this Mac.
+const INSPECT: &str = "target/debug/hilen-inspect";
 
 /// What runs, kept between the commands.
 #[derive(Serialize, Deserialize)]
@@ -177,16 +182,79 @@ impl Swap {
         Ok(())
     }
 
-    fn build(&self, app: &App) -> Result<PathBuf> {
-        let hot = Hot::at(&app.root, EXECUTABLE, BUNDLE_ID);
-        // Run from the engine repo, an app of another repo gets the engine
-        // of this folder, so both sides of a swap carry the same engine.
+    /// Builds the loader for a real iPhone with the app of this repo
+    /// inside, installs it on the paired phone and starts it. The loader
+    /// has the bundle id of this repo, see "A real iPhone" in
+    /// docs/hot-reload.md.
+    pub fn phone_install(&self) -> Result<()> {
+        let config = config::read()?;
+        let app = App {
+            name: config.app_name,
+            root: self.here.clone(),
+        };
+
+        step(&format!("building {} for the phone", app.name));
+        let library = self.build_for_phone(&app)?;
+
+        step("building the loader");
+        let loader = Hot::at(&self.here, PHONE_EXECUTABLE, &config.bundle_id).build_device_loader(&library)?;
+
+        step("installing on the phone");
+        let device = phone()?;
+        run(&format!("xcrun devicectl device install app --device {device} \"{}\"", loader.display()))?;
+        run(&format!(
+            "xcrun devicectl device process launch --device {device} --terminate-existing {}",
+            config.bundle_id
+        ))
+    }
+
+    /// Builds the app in `folder` and swaps the loader on the phone to it.
+    pub fn phone_to(&self, folder: &str) -> Result<()> {
+        let app = App::find(folder)?;
+
+        step(&format!("building {} for the phone", app.name));
+        let library = self.build_for_phone(&app)?;
+        sign_library(&library)?;
+
+        step(&format!("sending {} to the phone", app.name));
+        let inspect = self.inspect()?;
+        let assets = app.root.join("assets");
+        let assets = if assets.is_dir() { format!(" --assets \"{}\"", assets.display()) } else { String::new() };
+        run(&format!("\"{}\" hot-send \"{}\" {}{assets}", inspect.display(), library.display(), app.name))
+    }
+
+    pub fn phone_status(&self) -> Result<()> {
+        run(&format!("\"{}\" hot-status", self.inspect()?.display()))
+    }
+
+    /// The inspect tool of this repo, built with the engine of this folder,
+    /// so both sides of a send speak the same protocol.
+    fn inspect(&self) -> Result<PathBuf> {
+        let hot = Hot::at(&self.here, EXECUTABLE, BUNDLE_ID);
+        hot.build_tool("hilen-inspect", INSPECT)?;
+        Ok(self.here.join(INSPECT))
+    }
+
+    fn build_for_phone(&self, app: &App) -> Result<PathBuf> {
+        let hot = self.with_engine(Hot::at(&app.root, EXECUTABLE, BUNDLE_ID).for_device(), app);
+        hot.prepare()?;
+        hot.build_library(&app.name, "")
+    }
+
+    /// Run from the engine repo, an app of another repo gets the engine
+    /// of this folder, so both sides of a swap carry the same engine.
+    fn with_engine(&self, hot: Hot, app: &App) -> Hot {
         let engine_here = self.here.join("hilen/Cargo.toml").is_file();
-        let hot = if engine_here && app.root != self.here {
+        if engine_here && app.root != self.here {
             hot.with_engine(&self.here)
         } else {
             hot
-        };
+        }
+    }
+
+    fn build(&self, app: &App) -> Result<PathBuf> {
+        let hot = Hot::at(&app.root, EXECUTABLE, BUNDLE_ID);
+        let hot = self.with_engine(hot, app);
         hot.prepare()?;
         hot.build_library(&app.name, "")
     }

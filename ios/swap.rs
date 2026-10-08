@@ -17,6 +17,12 @@ const USAGE: &str = r"swap between apps in 1 process of the iOS simulator
   status                      the app on the screen and what the process holds
   stop                        end the process
 
+on a real iPhone, plugged in for the install, on the same network after it:
+
+  phone install               build the loader with the app of this repo, install and start it
+  phone <folder>              build the app and swap the phone to it
+  phone status                the library the loader on the phone runs
+
 A folder is the folder of the app crate. A name is its cargo package.";
 
 fn main() -> Result<()> {
@@ -29,6 +35,11 @@ fn main() -> Result<()> {
         "to" if args.len() == 2 => swap.to(&args[1]),
         "status" if args.len() == 1 => swap.status(),
         "stop" if args.len() == 1 => swap.stop(),
+        "phone" if args.len() == 2 => match args[1].as_str() {
+            "install" => swap.phone_install(),
+            "status" => swap.phone_status(),
+            folder => swap.phone_to(folder),
+        },
         _ => {
             println!("{USAGE}");
             bail!("no such command")

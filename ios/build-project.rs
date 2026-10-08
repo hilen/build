@@ -5,7 +5,7 @@ use std::fs::{read_to_string, write};
 use anyhow::{Result, ensure};
 use regex::Regex;
 use shared::{
-    config, ios,
+    config, inspect, ios,
     run::{has, run},
 };
 
@@ -66,6 +66,21 @@ fn main() -> Result<()> {
         "/usr/libexec/PlistBuddy -c \"Set :CFBundleShortVersionString {}\" mobile/iOS/{}/Info.plist",
         config.version, config.project_name
     ))?;
+
+    // An iPhone lets an app announce itself on the local network only with
+    // these 2 keys, see docs/inspect.md in hilen. Only a build with the
+    // inspect server announces, a shipped app has none of this.
+    let lib = format!("target/universal/release/{}", config.lib_name);
+    if inspect::has_server(&lib)? {
+        let plist = format!("mobile/iOS/{}/Info.plist", config.project_name);
+        for command in [
+            "Add :NSLocalNetworkUsageDescription string The developer tools find this app on the local network.",
+            "Add :NSBonjourServices array",
+            "Add :NSBonjourServices:0 string _hilen-inspect._tcp",
+        ] {
+            run(&format!("/usr/libexec/PlistBuddy -c \"{command}\" {plist}"))?;
+        }
+    }
 
     std::env::set_current_dir("mobile/iOS")?;
 

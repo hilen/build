@@ -4,7 +4,7 @@
 //! `refuse` checks the built file itself, which also catches a build that never
 //! set the mark.
 
-use std::process::Command;
+use std::process::{Command, Output};
 
 use anyhow::{Result, bail};
 
@@ -27,14 +27,32 @@ pub fn is_release() -> bool {
     std::env::var(RELEASE_ENV).is_ok_and(|mark| !mark.is_empty())
 }
 
+fn scan(path: &str) -> Result<Output> {
+    let marker = MARKER_PARTS.concat();
+    Ok(Command::new("grep")
+        .args(["-r", "-l", "-a", "-F", "--", &marker, path])
+        .output()?)
+}
+
+/// Whether the file at `path` carries the inspect server. An iOS app with it
+/// needs the local network keys in its `Info.plist`.
+pub fn has_server(path: &str) -> Result<bool> {
+    let out = scan(path)?;
+    match out.status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        _ => bail!(
+            "could not scan {path} for the inspect server: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ),
+    }
+}
+
 /// Fails when the file at `path`, or any file under it for a folder, carries
 /// the inspect server. Call it on the built binary before anything is signed,
 /// packed or copied to dist.
 pub fn refuse(path: &str) -> Result<()> {
-    let marker = MARKER_PARTS.concat();
-    let out = Command::new("grep")
-        .args(["-r", "-l", "-a", "-F", "--", &marker, path])
-        .output()?;
+    let out = scan(path)?;
     match out.status.code() {
         Some(1) => {
             println!("{path} has no inspect server");

@@ -26,10 +26,14 @@ use crate::{
 /// The simulator of an Apple Silicon Mac. No Rosetta, which keeps a
 /// translation of every library a process ever loaded.
 pub const TARGET: &str = "aarch64-apple-ios-sim";
+/// A real iPhone, see "A real iPhone" in docs/hot-reload.md.
+const DEVICE_TARGET: &str = "aarch64-apple-ios";
+/// Where Xcode keeps the provisioning profiles it made.
+const PROFILES: &str = "Library/Developer/Xcode/UserData/Provisioning Profiles";
 /// No arm64 simulator is older than iOS 14.
 const IOS_MINIMUM: &str = "14.0";
 /// The flag takes rayon out of the engine, its threads never end.
-const HOT_FLAG: &str = r#"--config 'build.rustflags=["--cfg","hilen_hot"]'"#;
+const HOT_CFG: &str = r#"["--cfg","hilen_hot"]"#;
 /// The folder of the libraries and the pointer file, below the repo root.
 const HOT_DIR: &str = "target/hot/lib";
 const POINTER: &str = "current";
@@ -79,6 +83,8 @@ pub struct Hot {
     /// The repo of an engine on disk that the library is built with, in
     /// place of the engine the app names.
     engine:     Option<PathBuf>,
+    /// The library is for a real iPhone, not for the simulator.
+    device:     bool,
 }
 
 impl Hot {
@@ -103,6 +109,35 @@ impl Hot {
             bundle_id:  bundle_id.to_string(),
             dir:        root.join(HOT_DIR),
             engine:     None,
+            device:     false,
+        }
+    }
+
+    /// The library is built for a real iPhone.
+    #[must_use]
+    pub fn for_device(mut self) -> Self {
+        self.device = true;
+        self
+    }
+
+    fn target(&self) -> &'static str {
+        if self.device { DEVICE_TARGET } else { TARGET }
+    }
+
+    /// The cargo argument that adds the hot flag to the compiler flags.
+    /// Cargo takes the flags of a target and then ignores the general
+    /// ones, so the flag has to go where the repo keeps its own.
+    fn hot_flag(&self) -> String {
+        let target = self.target();
+        let config = read_to_string(self.root.join(".cargo/config.toml")).unwrap_or_default();
+        let own_target_flags = toml::from_str::<toml::Table>(&config)
+            .ok()
+            .and_then(|config| config.get("target")?.get(target)?.get("rustflags").cloned())
+            .is_some();
+        if own_target_flags {
+            format!("--config 'target.{target}.rustflags={HOT_CFG}'")
+        } else {
+            format!("--config 'build.rustflags={HOT_CFG}'")
         }
     }
 
@@ -157,15 +192,17 @@ impl Hot {
     }
 
     pub fn prepare(&self) -> Result<()> {
-        run(&self.on_builder(&format!("rustup target add {TARGET}")))
+        run(&self.on_builder(&format!("rustup target add {}", self.target())))
     }
 
     /// Builds `package` as 1 dynamic library with the engine inside and
     /// brings it here. `features` are more cargo features of the package.
     pub fn build_library(&self, package: &str, features: &str) -> Result<PathBuf> {
         let exports = format!("export CFLAGS= SDKROOT= IPHONEOS_DEPLOYMENT_TARGET={IOS_MINIMUM}");
+        let target = self.target();
+        let hot_flag = self.hot_flag();
         let cargo = format!(
-            "cargo rustc -p {package} --lib --target {TARGET} --crate-type cdylib --features hilen/hot{features} {HOT_FLAG}"
+            "cargo rustc -p {package} --lib --target {target} --crate-type cdylib --features hilen/hot{features} {hot_flag}"
         );
         let line = match &self.engine {
             Some(engine) => {
@@ -184,7 +221,7 @@ impl Hot {
         self.send_engine()?;
         run(&self.on_builder(&line))?;
 
-        let library = format!("target/{TARGET}/debug/lib{}.dylib", package.replace('-', "_"));
+        let library = format!("target/{target}/debug/lib{}.dylib", package.replace('-', "_"));
         self.fetch(&library)?;
         Ok(self.root.join(library))
     }
@@ -207,6 +244,44 @@ codesign -s - --force {app}"
         );
         run(&self.on_builder(&line))?;
         self.fetch(&app)?;
+        Ok(self.root.join(app))
+    }
+
+    /// Builds a program of this repo that has to run on this Mac and
+    /// brings it here.
+    pub fn build_tool(&self, package: &str, program: &str) -> Result<()> {
+        run(&self.on_builder(&format!("cargo build -p {package}")))?;
+        self.fetch(program)
+    }
+
+    /// Builds the loader app for a real iPhone, here and not on a builder,
+    /// since the development certificate is on this Mac. `library` is the
+    /// app the loader shows when nothing was sent to it, it goes into the
+    /// loader app. Run from the hilen repo, the loader source is taken from
+    /// this folder.
+    pub fn build_device_loader(&self, library: &Path) -> Result<PathBuf> {
+        let executable = &self.executable;
+        let bundle_id = &self.bundle_id;
+        let native = "hilen/native/ios";
+        let folder = "target/hot/device";
+        let app = format!("{folder}/{executable}.app");
+        let profile = development_profile(bundle_id)?;
+        let profile = profile.display();
+        let identity = sign_identity()?;
+        let library = library.display();
+        let line = format!(
+            "rm -rf {app} && mkdir -p {app}/Frameworks && \
+sed -e s/HILEN_EXECUTABLE/{executable}/g -e s/HILEN_BUNDLE_ID/{bundle_id}/g {native}/hot_loader.plist > {app}/Info.plist && \
+if [ -d assets ]; then cp -R assets {app}/assets; fi && \
+xcrun -sdk iphoneos clang -target arm64-apple-ios{IOS_MINIMUM} -fobjc-arc -Wall {native}/hot_loader.m \
+-framework UIKit -framework Foundation -o {app}/{executable} && \
+cp \"{library}\" {app}/Frameworks/default.dylib && \
+cp \"{profile}\" {app}/embedded.mobileprovision && \
+security cms -D -i \"{profile}\" | plutil -extract Entitlements xml1 -o {folder}/entitlements.plist - && \
+codesign -s {identity} --force {app}/Frameworks/default.dylib && \
+codesign -s {identity} --force --entitlements {folder}/entitlements.plist {app}"
+        );
+        run(&self.in_root(&line))?;
         Ok(self.root.join(app))
     }
 
@@ -354,6 +429,59 @@ codesign -s - --force {app}"
         walk(&self.root, &mut state)?;
         Ok(state)
     }
+}
+
+/// The development certificate of this Mac, as the hash `codesign` takes.
+/// iOS loads a library on a phone only with this signature.
+pub fn sign_identity() -> Result<String> {
+    let identities = capture("security find-identity -v -p codesigning")?;
+    let line = identities
+        .lines()
+        .find(|line| line.contains("Apple Development"))
+        .context("no Apple Development certificate in the keychain")?;
+    Ok(line.split_whitespace().nth(1).context("no hash in the identity line")?.to_string())
+}
+
+/// Signs a library for a phone, in place.
+pub fn sign_library(library: &Path) -> Result<()> {
+    run(&format!("codesign -s {} --force \"{}\"", sign_identity()?, library.display()))
+}
+
+/// The development profile Xcode made for the app `bundle_id`. A loader
+/// built with no Xcode project cannot ask for a new one.
+fn development_profile(bundle_id: &str) -> Result<PathBuf> {
+    let folder = PathBuf::from(std::env::var("HOME")?).join(PROFILES);
+    for entry in read_dir(&folder).with_context(|| format!("no profiles in {}", folder.display()))? {
+        let path = entry?.path();
+        if path.extension().is_none_or(|extension| extension != "mobileprovision") {
+            continue;
+        }
+        let read = |key: &str| {
+            probe(&format!(
+                "security cms -D -i \"{}\" 2>/dev/null | plutil -extract Entitlements.{key} raw - 2>/dev/null",
+                path.display()
+            ))
+        };
+        // The id is the team, a dot, then the bundle id.
+        let same_app = read("application-identifier").trim().split_once('.').is_some_and(|(_, id)| id == bundle_id);
+        if same_app && read("get-task-allow").trim() == "true" {
+            return Ok(path);
+        }
+    }
+    bail!("no development profile for {bundle_id}, build the app for a phone in Xcode once")
+}
+
+/// The iPhone that is connected and paired, as `devicectl` names it.
+pub fn phone() -> Result<String> {
+    let devices = capture("xcrun devicectl list devices")?;
+    let line = devices
+        .lines()
+        .find(|line| line.contains("available") && line.contains("iPhone"))
+        .context("no paired iPhone, plug it in and unlock it")?;
+    line.split_whitespace()
+        .find(|word| word.len() == 36 && word.matches('-').count() == 4)
+        .map(str::to_string)
+        .context("no device id in the devicectl line")
 }
 
 /// The red, green and blue of the pixel in the middle of the screen.
