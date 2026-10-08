@@ -6,7 +6,7 @@
 
 use anyhow::{Result, bail};
 use regex::Regex;
-use shared::run::{capture, probe, run};
+use shared::run::{capture, has, probe, run};
 
 fn main() -> Result<()> {
     let kind = std::env::args().nth(1).unwrap_or_default();
@@ -60,6 +60,12 @@ fn write_version(version: &str) -> Result<()> {
     // Cargo.lock carries the version of every workspace package. cargo rewrites
     // only those entries. A stale one fails the --locked release build, and the
     // next cargo run would leave the tree dirty after a release.
-    run("cargo update --workspace")?;
+    // A machine with no Rust toolchain has no cargo, far runs it on a
+    // build machine and brings the changed lock file back.
+    if has("cargo") {
+        run("cargo update --workspace")?;
+    } else {
+        run("far cargo update --workspace")?;
+    }
     Ok(())
 }
