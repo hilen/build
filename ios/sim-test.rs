@@ -37,7 +37,7 @@ use anyhow::{Result, bail};
 use regex::Regex;
 use shared::{
     config, ios,
-    run::{probe, run_quiet},
+    run::{has, probe, run_quiet},
 };
 
 const DEVICE_NAME: &str = "te-iPhone8-16.4";
@@ -143,19 +143,30 @@ fn main() -> Result<()> {
     let app = format!("{symroot}/Release-iphonesimulator/{}.app", config.project_name);
     let xcodeproj = format!("mobile/iOS/{}.xcodeproj", config.project_name);
 
-    step("adding the iOS simulator rust target");
-    run_quiet(&format!("rustup target add {SIM_TRIPLE}"))?;
+    // No Rust toolchain here. The lib is built on a mac builder and comes
+    // back, Xcode on this machine then links it, like in build-lib.rs.
+    let local = has("cargo");
+    if local {
+        step("adding the iOS simulator rust target");
+        run_quiet(&format!("rustup target add {SIM_TRIPLE}"))?;
+    }
 
     // --lib only. The bin target fails to link on iOS, it needs a symbol the
     // UIKit shell provides, and only the staticlib is wanted here. Release, so
     // the suite runs at real speed. The Xcode project links the lib from
     // target/universal/release.
     step("building the engine for iOS, this takes a while");
-    run_quiet(&format!(
+    let build = format!(
         "env CARGO_TARGET_DIR={IOS_TARGET_DIR} IPHONEOS_DEPLOYMENT_TARGET=12.0 \
 cargo build -p {} --lib --target {SIM_TRIPLE} --release",
         config.app_name
-    ))?;
+    );
+    if local {
+        run_quiet(&build)?;
+    } else {
+        run_quiet(&format!("far --on mac 'rustup target add {SIM_TRIPLE} && {build}'"))?;
+        run_quiet(&format!("far --on mac get {lib}"))?;
+    }
     run_quiet(&format!(
         "mkdir -p target/universal/release && cp {lib} {linked_lib}"
     ))?;
@@ -164,7 +175,9 @@ cargo build -p {} --lib --target {SIM_TRIPLE} --release",
     // missing or older than the system input helper, not on every run.
     let helper_scheme = format!("{xcodeproj}/xcshareddata/xcschemes/{SYSTEM_INPUT_SCHEME}.xcscheme");
     if !std::path::Path::new(&helper_scheme).exists() {
-        run_quiet("cargo install hilen-mobile --locked")?;
+        if local {
+            run_quiet("cargo install hilen-mobile --locked")?;
+        }
         run_quiet("hilen-mobile")?;
     }
 
