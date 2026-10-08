@@ -40,7 +40,9 @@ mv $P/lib/libdav1d.a $P/lib/dav1d.lib
 
 # llvm-ar, not llvm-lib: configure passes the flags of GNU ar. Autodetect is
 # off, so the TLS of Windows, Schannel, is named, without it the archive has
-# no https protocol. The filter list is the one of ffmpeg.rs.
+# no https protocol. Media Foundation is named for the same reason, it is
+# the h264 encoder of Windows, h264_mf, the export of a video needs it. The
+# filter list is the one of ffmpeg.rs.
 mkdir -p /opt/ffmpeg-build && cd /opt/ffmpeg-build
 PKG_CONFIG_PATH=$P/lib/pkgconfig /src/ffmpeg/configure --prefix=$P \
     --target-os=win64 --arch=x86_64 --enable-cross-compile --toolchain=msvc \
@@ -51,13 +53,16 @@ PKG_CONFIG_PATH=$P/lib/pkgconfig /src/ffmpeg/configure --prefix=$P \
     --enable-static --disable-shared --disable-autodetect --disable-programs --disable-doc --disable-debug \
     --enable-avcodec --enable-avformat --enable-swresample --enable-swscale --disable-avdevice \
     --enable-avfilter --disable-filters --enable-filter=atempo --enable-filter=abuffer --enable-filter=abuffersink \
-    --enable-zlib --enable-libdav1d --enable-d3d11va --enable-schannel \
+    --enable-zlib --enable-libdav1d --enable-d3d11va --enable-schannel --enable-mediafoundation \
     --disable-gpl --disable-version3 --disable-nonfree
 make -j"$(nproc)" install
 
 # What has to be linked besides the ffmpeg libraries, the 2 libraries of the
-# archive and the Windows ones that configure lists as EXTRALIBS.
-printf 'static=dav1d\nstatic=zlib\ndylib=secur32\ndylib=ncrypt\ndylib=crypt32\ndylib=ws2_32\ndylib=ole32\ndylib=user32\ndylib=bcrypt\n' > $P/lib/link.txt
+# archive and the Windows ones that configure lists as EXTRALIBS. mfuuid and
+# strmiids are the ids Media Foundation is called by, plain data with no DLL
+# behind them. ffmpeg loads mfplat.dll itself when the encoder opens, so an
+# app starts also on a Windows that has no Media Foundation.
+printf 'static=dav1d\nstatic=zlib\ndylib=secur32\ndylib=ncrypt\ndylib=crypt32\ndylib=ws2_32\ndylib=ole32\ndylib=user32\ndylib=bcrypt\ndylib=mfuuid\ndylib=strmiids\n' > $P/lib/link.txt
 
 tar -C $P --exclude=lib/pkgconfig -czf /out/$NAME.tar.gz include lib
 cd /out && sha256sum $NAME.tar.gz > $NAME.sha256
