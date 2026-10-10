@@ -1,6 +1,9 @@
 #!/usr/bin/env rust
 
-use std::fs::{read_to_string, write};
+use std::{
+    fs::{read_to_string, write},
+    path::Path,
+};
 
 use anyhow::{Result, ensure};
 use regex::Regex;
@@ -32,6 +35,21 @@ fn main() -> Result<()> {
 
     let args: Vec<String> = std::env::args().skip(1).collect();
     run(format!("hilen-mobile {}", args.join(" ")).trim())?;
+
+    // The template has a placeholder icon. An app keeps its own tvOS icon
+    // set, the layered icon and the top shelf pictures, in
+    // `assets/TVIcon.brandassets`, and it goes over the one of the template.
+    let own_icon = Path::new("assets/TVIcon.brandassets");
+    if own_icon.is_dir() {
+        let template = format!(
+            "mobile/tvOS/{}/Assets.xcassets/App Icon & Top Shelf Image.brandassets",
+            config.project_name
+        );
+        run(&format!(
+            "rm -rf \"{template}\" && cp -R \"{}\" \"{template}\"",
+            own_icon.display()
+        ))?;
+    }
 
     let project_path = format!("mobile/tvOS/{}.xcodeproj/project.pbxproj", config.project_name);
     let project = read_to_string(&project_path)?;
