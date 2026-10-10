@@ -1,4 +1,5 @@
-//! Hot reload of an app in the iOS simulator, see docs/hot-reload.md in hilen.
+//! Hot reload of an app in the iOS simulator or in the Apple TV simulator,
+//! see docs/hot-reload.md in hilen.
 //!
 //! The app is built as 1 dynamic library. A small loader app is installed
 //! once and loads the library from a folder on this Mac. Every new build
@@ -21,17 +22,24 @@ use serde::Deserialize;
 use crate::{
     config::Config,
     run::{capture, probe, run, run_allow_fail, run_quiet},
+    tvos,
 };
 
 /// The simulator of an Apple Silicon Mac. No Rosetta, which keeps a
 /// translation of every library a process ever loaded.
-pub const TARGET: &str = "aarch64-apple-ios-sim";
+const TARGET: &str = "aarch64-apple-ios-sim";
 /// A real iPhone, see "A real iPhone" in docs/hot-reload.md.
 const DEVICE_TARGET: &str = "aarch64-apple-ios";
 /// Where Xcode keeps the provisioning profiles it made.
 const PROFILES: &str = "Library/Developer/Xcode/UserData/Provisioning Profiles";
 /// No arm64 simulator is older than iOS 14.
 const IOS_MINIMUM: &str = "14.0";
+/// The oldest tvOS of a normal build, see docs/tvos.md in hilen.
+const TVOS_MINIMUM: &str = "15.0";
+/// tvOS has no prebuilt standard library, a build compiles it too.
+const TVOS_BUILD_STD: &str = " -Z build-std=std,panic_abort";
+/// The word of a command line that asks for an Apple TV.
+const TV_WORD: &str = "tv";
 /// The flag takes rayon out of the engine, its threads never end.
 const HOT_CFG: &str = r#"["--cfg","hilen_hot"]"#;
 /// The folder of the libraries and the pointer file, below the repo root.
@@ -54,6 +62,15 @@ const FAR_JOB: &str = "FAR_JOB";
 /// The device of a far job, the same one the UI test lane makes.
 const JOB_DEVICE_TYPE: &str = "com.apple.CoreSimulator.SimDeviceType.iPhone-8";
 const JOB_RUNTIME: &str = "com.apple.CoreSimulator.SimRuntime.iOS-16-4";
+/// The Apple TV of a far job, the one docs/tvos.md in hilen was proven on.
+const JOB_TV_DEVICE_TYPE: &str = "com.apple.CoreSimulator.SimDeviceType.Apple-TV-4K-3rd-generation-1080p";
+const JOB_TV_RUNTIME: &str = "com.apple.CoreSimulator.SimRuntime.tvOS-26-2";
+/// A `simctl` list has the devices of a system under a line like
+/// `-- tvOS 26.2 --`.
+const SECTION: &str = "-- ";
+const TV_SECTION: &str = "tvOS";
+/// A TV picture of this size draws 4 times fewer pixels than 4K.
+const TV_SMALL: &str = "1080p";
 const MARKER_POLL: Duration = Duration::from_millis(250);
 const MARKER_TRIES: usize = 120;
 /// Folders a change in which is no change of the app.
@@ -71,7 +88,27 @@ struct Package {
     manifest_path: PathBuf,
 }
 
+/// The system a hot library and its loader are built for.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum System {
+    Ios,
+    Tvos,
+}
+
+impl System {
+    /// Takes the word that asks for an Apple TV off the front of `args`.
+    pub fn take(args: &mut Vec<String>) -> Self {
+        if args.first().is_some_and(|word| word == TV_WORD) {
+            args.remove(0);
+            Self::Tvos
+        } else {
+            Self::Ios
+        }
+    }
+}
+
 pub struct Hot {
+    system:     System,
     /// The builds go to a build machine.
     far:        bool,
     root:       PathBuf,
@@ -103,6 +140,7 @@ impl Hot {
         // Inside a far job this machine is the builder already.
         let on_builder = std::env::var(FAR_JOB).is_ok();
         Self {
+            system:     System::Ios,
             far:        !on_builder && !probe("command -v far").trim().is_empty(),
             root:       root.to_path_buf(),
             executable: executable.to_string(),
@@ -120,8 +158,50 @@ impl Hot {
         self
     }
 
+    /// The library and the loader are built for `system`. An Apple TV gets
+    /// folders of its own, so a loader of one system never sees a library
+    /// of the other. Call it before `with_dir`.
+    #[must_use]
+    pub fn for_system(mut self, system: System) -> Self {
+        self.system = system;
+        self.dir = self.root.join(self.out()).join("lib");
+        self
+    }
+
+    /// The folder of everything a hot build makes, below the repo root.
+    fn out(&self) -> &'static str {
+        match self.system {
+            System::Ios => "target/hot",
+            System::Tvos => "target/hot/tv",
+        }
+    }
+
     fn target(&self) -> &'static str {
-        if self.device { DEVICE_TARGET } else { TARGET }
+        match (self.system, self.device) {
+            (System::Ios, false) => TARGET,
+            (System::Ios, true) => DEVICE_TARGET,
+            (System::Tvos, false) => tvos::SIMULATOR,
+            (System::Tvos, true) => tvos::DEVICE,
+        }
+    }
+
+    /// What the loader is compiled with, for the simulator or for a real
+    /// device: the SDK, the target of `clang` and the file the `Info.plist`
+    /// is made from.
+    fn loader_parts(&self, device: bool) -> (&'static str, String, &'static str) {
+        let simulator = if device { "" } else { "-simulator" };
+        match (self.system, device) {
+            (System::Ios, false) => {
+                ("iphonesimulator", format!("arm64-apple-ios{IOS_MINIMUM}{simulator}"), "hot_loader.plist")
+            }
+            (System::Ios, true) => ("iphoneos", format!("arm64-apple-ios{IOS_MINIMUM}{simulator}"), "hot_loader.plist"),
+            (System::Tvos, false) => {
+                ("appletvsimulator", format!("arm64-apple-tvos{TVOS_MINIMUM}{simulator}"), "hot_loader_tvos.plist")
+            }
+            (System::Tvos, true) => {
+                ("appletvos", format!("arm64-apple-tvos{TVOS_MINIMUM}{simulator}"), "hot_loader_tvos.plist")
+            }
+        }
     }
 
     /// The cargo argument that adds the hot flag to the compiler flags.
@@ -192,17 +272,26 @@ impl Hot {
     }
 
     pub fn prepare(&self) -> Result<()> {
-        run(&self.on_builder(&format!("rustup target add {}", self.target())))
+        let line = match self.system {
+            System::Ios => format!("rustup target add {}", self.target()),
+            // A tvOS target cannot be added, it is built from the sources.
+            System::Tvos => "rustup component add rust-src".to_string(),
+        };
+        run(&self.on_builder(&line))
     }
 
     /// Builds `package` as 1 dynamic library with the engine inside and
     /// brings it here. `features` are more cargo features of the package.
     pub fn build_library(&self, package: &str, features: &str) -> Result<PathBuf> {
-        let exports = format!("export CFLAGS= SDKROOT= IPHONEOS_DEPLOYMENT_TARGET={IOS_MINIMUM}");
+        let (minimum, build_std) = match self.system {
+            System::Ios => (format!("IPHONEOS_DEPLOYMENT_TARGET={IOS_MINIMUM}"), ""),
+            System::Tvos => (format!("TVOS_DEPLOYMENT_TARGET={TVOS_MINIMUM}"), TVOS_BUILD_STD),
+        };
+        let exports = format!("export CFLAGS= SDKROOT= {minimum}");
         let target = self.target();
         let hot_flag = self.hot_flag();
         let cargo = format!(
-            "cargo rustc -p {package} --lib --target {target} --crate-type cdylib --features hilen/hot{features} {hot_flag}"
+            "cargo rustc -p {package} --lib --target {target} --crate-type cdylib --features hilen/hot{features} {hot_flag}{build_std}"
         );
         let line = match &self.engine {
             Some(engine) => {
@@ -233,12 +322,13 @@ impl Hot {
         let native = native.display();
         let executable = &self.executable;
         let bundle_id = &self.bundle_id;
-        let app = format!("target/hot/{executable}.app");
+        let app = format!("{}/{executable}.app", self.out());
+        let (sdk, clang_target, plist) = self.loader_parts(false);
         let line = format!(
             "rm -rf {app} && mkdir -p {app} && \
-sed -e s/HILEN_EXECUTABLE/{executable}/g -e s/HILEN_BUNDLE_ID/{bundle_id}/g {native}/hot_loader.plist > {app}/Info.plist && \
+sed -e s/HILEN_EXECUTABLE/{executable}/g -e s/HILEN_BUNDLE_ID/{bundle_id}/g {native}/{plist} > {app}/Info.plist && \
 if [ -d assets ]; then cp -R assets {app}/assets; fi && \
-xcrun -sdk iphonesimulator clang -target arm64-apple-ios{IOS_MINIMUM}-simulator -fobjc-arc -Wall {native}/hot_loader.m \
+xcrun -sdk {sdk} clang -target {clang_target} -fobjc-arc -Wall {native}/hot_loader.m \
 -framework UIKit -framework Foundation -o {app}/{executable} && \
 codesign -s - --force {app}"
         );
@@ -254,7 +344,7 @@ codesign -s - --force {app}"
         self.fetch(program)
     }
 
-    /// Builds the loader app for a real iPhone, here and not on a builder,
+    /// Builds the loader app for a real iPhone or Apple TV, here and not on a builder,
     /// since the development certificate is on this Mac. `library` is the
     /// app the loader shows when nothing was sent to it, it goes into the
     /// loader app. Run from the hilen repo, the loader source is taken from
@@ -263,17 +353,18 @@ codesign -s - --force {app}"
         let executable = &self.executable;
         let bundle_id = &self.bundle_id;
         let native = "hilen/native/ios";
-        let folder = "target/hot/device";
+        let folder = format!("{}/device", self.out());
         let app = format!("{folder}/{executable}.app");
-        let profile = development_profile(bundle_id)?;
+        let (sdk, clang_target, plist) = self.loader_parts(true);
+        let profile = development_profile(bundle_id, self.system)?;
         let profile = profile.display();
         let identity = sign_identity()?;
         let library = library.display();
         let line = format!(
             "rm -rf {app} && mkdir -p {app}/Frameworks && \
-sed -e s/HILEN_EXECUTABLE/{executable}/g -e s/HILEN_BUNDLE_ID/{bundle_id}/g {native}/hot_loader.plist > {app}/Info.plist && \
+sed -e s/HILEN_EXECUTABLE/{executable}/g -e s/HILEN_BUNDLE_ID/{bundle_id}/g {native}/{plist} > {app}/Info.plist && \
 if [ -d assets ]; then cp -R assets {app}/assets; fi && \
-xcrun -sdk iphoneos clang -target arm64-apple-ios{IOS_MINIMUM} -fobjc-arc -Wall {native}/hot_loader.m \
+xcrun -sdk {sdk} clang -target {clang_target} -fobjc-arc -Wall {native}/hot_loader.m \
 -framework UIKit -framework Foundation -o {app}/{executable} && \
 cp \"{library}\" {app}/Frameworks/default.dylib && \
 cp \"{profile}\" {app}/embedded.mobileprovision && \
@@ -345,23 +436,31 @@ codesign -s {identity} --force --entitlements {folder}/entitlements.plist {app}"
         Ok(())
     }
 
-    /// The simulator device to run in: one that is booted, or the first
-    /// iPhone there is, booted here. A far job makes a device of its own,
-    /// the builder is shared and a booted device there belongs to another
-    /// session. `release_device` deletes it again.
+    /// The simulator device to run in: one of the system that is booted, or
+    /// the first iPhone or Apple TV there is, booted here. A far job makes
+    /// a device of its own, the builder is shared and a booted device there
+    /// belongs to another session. `release_device` deletes it again.
     pub fn device(&self) -> Result<String> {
+        let tv = self.system == System::Tvos;
         if let Ok(job) = std::env::var(FAR_JOB) {
-            let device = capture(&format!("xcrun simctl create hilen-hot-{job} {JOB_DEVICE_TYPE} {JOB_RUNTIME}"))?;
+            let (device_type, runtime) =
+                if tv { (JOB_TV_DEVICE_TYPE, JOB_TV_RUNTIME) } else { (JOB_DEVICE_TYPE, JOB_RUNTIME) };
+            let device = capture(&format!("xcrun simctl create hilen-hot-{job} {device_type} {runtime}"))?;
             run(&format!("xcrun simctl boot {device}"))?;
             run(&format!("xcrun simctl bootstatus {device} -b"))?;
             return Ok(device);
         }
-        if let Some(booted) = first_device(&probe("xcrun simctl list devices booted")) {
+        let booted = probe("xcrun simctl list devices booted");
+        if let Some(booted) = first_device(&of_system(&booted, tv)) {
             return Ok(booted);
         }
-        let devices = probe("xcrun simctl list devices available");
-        let iphones: String = devices.lines().filter(|line| line.contains("iPhone")).collect::<Vec<_>>().join("\n");
-        let Some(device) = first_device(&iphones) else {
+        let devices = of_system(&probe("xcrun simctl list devices available"), tv);
+        let wanted = lines_with(&devices, if tv { TV_SMALL } else { "iPhone" });
+        let fitting = if tv && wanted.is_empty() { devices } else { wanted };
+        let Some(device) = first_device(&fitting) else {
+            if tv {
+                bail!("no Apple TV simulator device, make one, see docs/tvos.md in hilen");
+            }
             bail!("no iPhone simulator device, make one in Xcode");
         };
         run(&format!("xcrun simctl boot {device}"))?;
@@ -447,9 +546,14 @@ pub fn sign_library(library: &Path) -> Result<()> {
     run(&format!("codesign -s {} --force \"{}\"", sign_identity()?, library.display()))
 }
 
-/// The development profile Xcode made for the app `bundle_id`. A loader
-/// built with no Xcode project cannot ask for a new one.
-fn development_profile(bundle_id: &str) -> Result<PathBuf> {
+/// The development profile Xcode made for the app `bundle_id` on `system`.
+/// A loader built with no Xcode project cannot ask for a new one. An app
+/// has a profile for each system under the same id.
+pub fn development_profile(bundle_id: &str, system: System) -> Result<PathBuf> {
+    let platform = match system {
+        System::Ios => "iOS",
+        System::Tvos => "tvOS",
+    };
     let folder = PathBuf::from(std::env::var("HOME")?).join(PROFILES);
     for entry in read_dir(&folder).with_context(|| format!("no profiles in {}", folder.display()))? {
         let path = entry?.path();
@@ -458,26 +562,32 @@ fn development_profile(bundle_id: &str) -> Result<PathBuf> {
         }
         let read = |key: &str| {
             probe(&format!(
-                "security cms -D -i \"{}\" 2>/dev/null | plutil -extract Entitlements.{key} raw - 2>/dev/null",
+                "security cms -D -i \"{}\" 2>/dev/null | plutil -extract {key} raw - 2>/dev/null",
                 path.display()
             ))
         };
         // The id is the team, a dot, then the bundle id.
-        let same_app = read("application-identifier").trim().split_once('.').is_some_and(|(_, id)| id == bundle_id);
-        if same_app && read("get-task-allow").trim() == "true" {
+        let same_app = read("Entitlements.application-identifier")
+            .trim()
+            .split_once('.')
+            .is_some_and(|(_, id)| id == bundle_id);
+        let development = read("Entitlements.get-task-allow").trim() == "true";
+        if same_app && development && read("Platform.0").trim() == platform {
             return Ok(path);
         }
     }
-    bail!("no development profile for {bundle_id}, build the app for a phone in Xcode once")
+    bail!("no {platform} development profile for {bundle_id}, build the app for a device in Xcode once")
 }
 
-/// The iPhone that is connected and paired, as `devicectl` names it.
-pub fn phone() -> Result<String> {
+/// The paired iPhone or Apple TV, as `devicectl` names it.
+pub fn paired(system: System) -> Result<String> {
+    let (model, missing) = match system {
+        System::Ios => ("iPhone", "no paired iPhone, plug it in and unlock it"),
+        System::Tvos => ("AppleTV", "no paired Apple TV, see \"An Apple TV\" in docs/hot-reload.md"),
+    };
     let devices = capture("xcrun devicectl list devices")?;
-    let line = devices
-        .lines()
-        .find(|line| line.contains("available") && line.contains("iPhone"))
-        .context("no paired iPhone, plug it in and unlock it")?;
+    let line =
+        devices.lines().find(|line| line.contains("available") && line.contains(model)).context(missing)?;
     line.split_whitespace()
         .find(|word| word.len() == 36 && word.matches('-').count() == 4)
         .map(str::to_string)
@@ -531,12 +641,35 @@ pub fn is_alive(pid: u32) -> bool {
     !probe(&format!("ps -p {pid} -o pid=")).trim().is_empty()
 }
 
+fn lines_with(list: &str, word: &str) -> String {
+    list.lines().filter(|line| line.contains(word)).collect::<Vec<_>>().join("\n")
+}
+
+/// The devices of a `simctl` list that are Apple TVs, or with `tv` false
+/// the ones that are not. The name of a device tells nothing, a person
+/// picks it.
+fn of_system(list: &str, tv: bool) -> String {
+    let mut in_tv = false;
+    let mut devices = vec![];
+    for line in list.lines() {
+        if line.starts_with(SECTION) {
+            in_tv = line.contains(TV_SECTION);
+        } else if in_tv == tv {
+            devices.push(line);
+        }
+    }
+    devices.join("\n")
+}
+
+/// The id of the first device in a `simctl` list. The name of a device can
+/// have brackets of its own, like `Apple TV 4K (3rd generation)`.
 fn first_device(list: &str) -> Option<String> {
     list.lines().find_map(|line| {
-        let start = line.find('(')? + 1;
-        let id = line.get(start..start + 36)?;
-        let is_id = id.len() == 36 && id.chars().all(|c| c.is_ascii_hexdigit() || c == '-');
-        is_id.then(|| id.to_string())
+        line.split('(').skip(1).find_map(|part| {
+            let id = part.get(..36)?;
+            let is_id = id.chars().all(|c| c.is_ascii_hexdigit() || c == '-');
+            is_id.then(|| id.to_string())
+        })
     })
 }
 
@@ -604,5 +737,31 @@ mod tests {
         let list = "-- iOS 16.4 --\n    iPhone 8 (81A051F7-CB2B-47D2-80FA-8F0AB4CC8B02) (Booted)";
         assert_eq!(first_device(list).as_deref(), Some("81A051F7-CB2B-47D2-80FA-8F0AB4CC8B02"));
         assert_eq!(first_device("== Devices ==\n-- iOS 16.4 --"), None);
+    }
+
+    #[test]
+    fn a_device_id_is_read_after_brackets_in_the_name() {
+        let list = "    Apple TV 4K (3rd generation) (at 1080p) (FB419527-D3BD-4E88-ACCA-016313DD9C08) (Shutdown)";
+        assert_eq!(first_device(list).as_deref(), Some("FB419527-D3BD-4E88-ACCA-016313DD9C08"));
+    }
+
+    #[test]
+    fn the_booted_devices_are_split_by_system() {
+        let list = r"== Devices ==
+-- iOS 16.4 --
+    iPhone 8 (81A051F7-CB2B-47D2-80FA-8F0AB4CC8B02) (Booted)
+-- tvOS 26.2 --
+    te-AppleTV-26.2 (D54028A6-1D59-4BEF-9387-C596548D148E) (Booted)";
+        assert_eq!(first_device(&of_system(list, true)).as_deref(), Some("D54028A6-1D59-4BEF-9387-C596548D148E"));
+        assert_eq!(first_device(&of_system(list, false)).as_deref(), Some("81A051F7-CB2B-47D2-80FA-8F0AB4CC8B02"));
+    }
+
+    #[test]
+    fn the_word_for_an_apple_tv_is_taken_off_the_arguments() {
+        let mut args = vec!["tv".to_string(), "start".to_string()];
+        assert!(System::take(&mut args) == System::Tvos);
+        assert_eq!(args, ["start"]);
+        assert!(System::take(&mut args) == System::Ios);
+        assert_eq!(args, ["start"]);
     }
 }

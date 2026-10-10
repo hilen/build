@@ -14,13 +14,15 @@ tvos-lib:
 	rust ./build/tvos/build-lib.rs
 
 # Hot reload in the iOS simulator of this Mac: a saved file shows in the
-# running app with no install and no restart. See hilen docs/hot-reload.md.
+# running app with no install and no restart. `make hot args="tv"` does it in
+# the Apple TV simulator. See hilen docs/hot-reload.md.
 hot:
-	rust ./build/ios/hot.rs
+	rust ./build/ios/hot.rs $(args)
 
 # 1 loader in the iOS simulator that swaps between several apps, on a command:
 # make swap args="start demo ../apps/skaityk", then args="to skaityk",
-# args="status" and args="stop". See hilen docs/hot-reload.md.
+# args="status" and args="stop". With `tv` as the first word it is the Apple
+# TV simulator, args="tv start demo ../apps/flixen". See hilen docs/hot-reload.md.
 swap:
 	rust ./build/ios/swap.rs $(args)
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env rust
 
-// The hot reload lane of hilen, `make hot-test`. See docs/hot-reload.md there.
+// The hot reload lane of hilen, `make hot-test`, and `make hot-test args="tv"`
+// for the Apple TV simulator. See docs/hot-reload.md there.
 //
 // Builds the `hot-test` app 2 times as a dynamic library, the second time as
 // the same app after a change. It starts the first through the loader, then
@@ -8,11 +9,11 @@
 // checks that the new code runs, that the screen shows it, that the process
 // is still the same, and that no thread of an old library stayed behind.
 
-use std::{fs::copy, path::Path, thread::sleep, time::Duration};
+use std::{env::args, fs::copy, path::Path, thread::sleep, time::Duration};
 
 use anyhow::{Result, bail};
 use shared::{
-    hot::{Hot, is_alive, screen_color, thread_count},
+    hot::{Hot, System, is_alive, screen_color, thread_count},
     run::run_quiet,
 };
 
@@ -50,7 +51,8 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let hot = Hot::named(EXECUTABLE, BUNDLE_ID)?;
+    let mut args: Vec<String> = args().skip(1).collect();
+    let hot = Hot::named(EXECUTABLE, BUNDLE_ID)?.for_system(System::take(&mut args));
     hot.prepare()?;
 
     // Both builds land in the same file, so each is put aside.
