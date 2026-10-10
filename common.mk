@@ -5,6 +5,14 @@ ios:
 ios-lib:
 	rust ./build/ios/build-lib.rs
 
+# An Apple TV. `tvos` builds the libs for the device and the simulator, makes
+# the Xcode project and builds it for the simulator. See hilen docs/tvos.md.
+tvos:
+	rust ./build/tvos/build-project.rs
+
+tvos-lib:
+	rust ./build/tvos/build-lib.rs
+
 # Hot reload in the iOS simulator of this Mac: a saved file shows in the
 # running app with no install and no restart. See hilen docs/hot-reload.md.
 hot:
@@ -37,6 +45,8 @@ test:
 	cargo test --all --release
 	echo release test: OK
 
+# Uploads the iOS build to TestFlight, and the tvOS build after it when
+# hilen.toml has `tvos = true`.
 fly:
 	rust ./build/ios/flight.rs
 

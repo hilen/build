@@ -4,7 +4,8 @@
 // docs/video.md in hilen. Run once per target. With no argument it builds
 // for the host. On a Mac `aarch64-apple-ios` cross builds for an iPhone,
 // `x86_64-apple-ios` for the simulator and `aarch64-apple-ios-sim` for the
-// simulator of an Apple Silicon Mac. The archive in dist/ goes to a
+// simulator of an Apple Silicon Mac, `aarch64-apple-tvos` for an Apple TV
+// and `aarch64-apple-tvos-sim` for its simulator. The archive in dist/ goes to a
 // release of this repo and the forked ffmpeg-sys-next downloads it from there, so a
 // normal build never compiles ffmpeg. The configure flags mirror what the
 // ffmpeg-sys-next `build` feature passes, minus debug info, so a locally
@@ -22,6 +23,8 @@ const VERSION: &str = "9.0";
 const DAV1D: &str = "1.5.4";
 /// The oldest iOS the engine runs on, see docs/ios.md in hilen.
 const IOS_MINIMUM: &str = "12.0";
+/// The oldest tvOS, the default of `tvos_minimum_version` in hilen.toml.
+const TVOS_MINIMUM: &str = "15.0";
 
 /// What a cross build for an Apple device needs to know.
 struct Cross {
@@ -30,6 +33,8 @@ struct Cross {
     /// The name meson has for it.
     cpu_family:  &'static str,
     sdk:         &'static str,
+    /// The name meson has for the system of the device.
+    subsystem:   &'static str,
     version_min: String,
     /// The simulator slice has no assembly. It only runs the UI tests under
     /// Rosetta, and the x86 assembly would need nasm on the build machine.
@@ -42,6 +47,7 @@ fn cross_for(triple: &str) -> Result<Cross> {
             arch:        "arm64",
             cpu_family:  "aarch64",
             sdk:         "iphoneos",
+            subsystem:   "ios",
             version_min: format!("-miphoneos-version-min={IOS_MINIMUM}"),
             assembly:    true,
         },
@@ -49,6 +55,7 @@ fn cross_for(triple: &str) -> Result<Cross> {
             arch:        "x86_64",
             cpu_family:  "x86_64",
             sdk:         "iphonesimulator",
+            subsystem:   "ios-simulator",
             version_min: format!("-mios-simulator-version-min={IOS_MINIMUM}"),
             assembly:    false,
         },
@@ -58,11 +65,28 @@ fn cross_for(triple: &str) -> Result<Cross> {
             arch:        "arm64",
             cpu_family:  "aarch64",
             sdk:         "iphonesimulator",
+            subsystem:   "ios-simulator",
             version_min: "-mios-simulator-version-min=14.0".to_string(),
             assembly:    true,
         },
+        "aarch64-apple-tvos" => Cross {
+            arch:        "arm64",
+            cpu_family:  "aarch64",
+            sdk:         "appletvos",
+            subsystem:   "tvos",
+            version_min: format!("-mtvos-version-min={TVOS_MINIMUM}"),
+            assembly:    true,
+        },
+        "aarch64-apple-tvos-sim" => Cross {
+            arch:        "arm64",
+            cpu_family:  "aarch64",
+            sdk:         "appletvsimulator",
+            subsystem:   "tvos-simulator",
+            version_min: format!("-mtvos-simulator-version-min={TVOS_MINIMUM}"),
+            assembly:    true,
+        },
         _ => bail!(
-            "no cross build for {triple}, only aarch64-apple-ios, aarch64-apple-ios-sim and x86_64-apple-ios"
+            "no cross build for {triple}, only aarch64-apple-ios, aarch64-apple-ios-sim, x86_64-apple-ios, aarch64-apple-tvos and aarch64-apple-tvos-sim"
         ),
     })
 }
@@ -229,6 +253,7 @@ fn meson_cross_file(cross: &Cross, sdk_path: &str) -> String {
     let arch = cross.arch;
     let cpu_family = cross.cpu_family;
     let version_min = &cross.version_min;
+    let subsystem = cross.subsystem;
     format!(
         r"[binaries]
 c = ['clang', '-arch', '{arch}', '-isysroot', '{sdk_path}']
@@ -241,7 +266,7 @@ c_link_args = ['{version_min}']
 
 [host_machine]
 system = 'darwin'
-subsystem = 'ios'
+subsystem = '{subsystem}'
 cpu_family = '{cpu_family}'
 cpu = '{arch}'
 endian = 'little'

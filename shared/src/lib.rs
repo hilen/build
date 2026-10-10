@@ -5,4 +5,5 @@ pub mod ios;
 pub mod release;
 pub mod run;
 pub mod swap;
+pub mod tvos;
 pub mod webos;

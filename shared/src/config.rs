@@ -21,6 +21,11 @@ pub struct Config {
     /// Minimum iOS version written into every generated Xcode configuration.
     /// App Store Connect rejects an upload that targets below iOS 13.
     pub ios_minimum_version: String,
+    /// Minimum tvOS version, for the Rust libs and the generated Xcode project.
+    pub tvos_minimum_version: String,
+    /// The app also ships for an Apple TV, `tvos = true` in hilen.toml.
+    /// `make fly` then uploads a tvOS build too.
+    pub tvos: bool,
 }
 
 /// Read from the repo root. Several scripts chdir into mobile/iOS partway
@@ -48,6 +53,10 @@ pub fn read() -> Result<Config> {
         .get("ios_minimum_version")
         .and_then(|v| v.as_str())
         .unwrap_or("13.0");
+    let tvos_minimum_version = value
+        .get("tvos_minimum_version")
+        .and_then(|v| v.as_str())
+        .unwrap_or("15.0");
 
     let parts = words(project);
     let snake = parts.join("_");
@@ -59,6 +68,8 @@ pub fn read() -> Result<Config> {
         bundle_id: bundle_id.to_string(),
         version: version.to_string(),
         ios_minimum_version: ios_minimum_version.to_string(),
+        tvos_minimum_version: tvos_minimum_version.to_string(),
+        tvos: value.get("tvos").and_then(serde_json::Value::as_bool).unwrap_or(false),
     })
 }
 
