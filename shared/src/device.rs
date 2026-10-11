@@ -36,6 +36,8 @@ pub struct Device {
     /// The id every `devicectl` command takes.
     pub id:     String,
     pub name:   String,
+    /// The system and its version, like `tvOS 26.3`.
+    pub os:     String,
     pub system: System,
     /// An app on it answers the inspect tool.
     answers:    bool,
@@ -58,18 +60,21 @@ impl Device {
         }
     }
 
-    /// A line of `hilen-inspect devices`: the id, the kind, the name and
-    /// the address an app answers at, with a tab between them.
+    /// A line of `hilen-inspect devices`: the id, the kind, the name, the
+    /// system with its version and the address an app answers at, with a
+    /// tab between them.
     fn from_line(line: &str, inspect: &Path) -> Result<Self> {
         let parts: Vec<&str> = line.split('\t').collect();
-        // A newer tool prints more columns between the name and the address.
+        // An older tool prints no system, the address is always last.
         if parts.len() < 4 {
             bail!("`hilen-inspect devices` printed a line that is no device: {line}");
         }
         let (id, kind, name, addr) = (parts[0], parts[1], parts[2], parts[parts.len() - 1]);
+        let os = if parts.len() > 4 { parts[3] } else { "" };
         Ok(Self {
             id:      id.to_string(),
             name:    name.to_string(),
+            os:      os.to_string(),
             system:  if kind == TV_KIND { System::Tvos } else { System::Ios },
             answers: addr != "-",
             inspect: inspect.to_path_buf(),
@@ -143,7 +148,7 @@ pub fn make_device(app: &Path, word: Option<&str>, command: Option<&str>) -> Res
     // The loader is built from the engine repo, and so is the inspect tool.
     set_current_dir(&engine)?;
     let device = Device::pick(&engine, word.as_deref())?;
-    println!("\n[device] {}", device.name);
+    println!("\n[device] {}, {}, {}", device.name, device.os, device.id);
     if let Some(dir) = kept.parent() {
         create_dir_all(dir)?;
     }
@@ -167,13 +172,14 @@ mod tests {
     #[test]
     fn a_device_is_read_from_a_line_of_the_inspect_tool() -> Result<()> {
         let tool = Path::new("hilen-inspect");
-        let phone = Device::from_line("1E96\tiPhone\tMy iPhone\t[fd00::1]:7435", tool)?;
+        let phone = Device::from_line("1E96\tiPhone\tMy iPhone\tiOS 27.0.1\t[fd00::1]:7435", tool)?;
         assert_eq!(phone.id, "1E96");
         assert_eq!(phone.name, "My iPhone");
+        assert_eq!(phone.os, "iOS 27.0.1");
         assert!(phone.system == System::Ios);
         assert!(phone.answers);
 
-        let tv = Device::from_line("88F1\tappleTV\tBedroom TV\t-", tool)?;
+        let tv = Device::from_line("88F1\tappleTV\tBedroom TV\ttvOS 26.3\t-", tool)?;
         assert!(tv.system == System::Tvos);
         assert!(!tv.answers);
 
