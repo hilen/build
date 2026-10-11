@@ -282,6 +282,8 @@ impl Hot {
 
     /// Builds `package` as 1 dynamic library with the engine inside and
     /// brings it here. `features` are more cargo features of the package.
+    /// It is a release build: a debug build of an app drew a frame several
+    /// times slower and made a phone hot.
     pub fn build_library(&self, package: &str, features: &str) -> Result<PathBuf> {
         let (minimum, build_std) = match self.system {
             System::Ios => (format!("IPHONEOS_DEPLOYMENT_TARGET={IOS_MINIMUM}"), ""),
@@ -291,7 +293,7 @@ impl Hot {
         let target = self.target();
         let hot_flag = self.hot_flag();
         let cargo = format!(
-            "cargo rustc -p {package} --lib --target {target} --crate-type cdylib --features hilen/hot{features} {hot_flag}{build_std}"
+            "cargo rustc -p {package} --lib --release --target {target} --crate-type cdylib --features hilen/hot{features} {hot_flag}{build_std}"
         );
         let line = match &self.engine {
             Some(engine) => {
@@ -310,7 +312,7 @@ impl Hot {
         self.send_engine()?;
         run(&self.on_builder(&line))?;
 
-        let library = format!("target/{target}/debug/lib{}.dylib", package.replace('-', "_"));
+        let library = format!("target/{target}/release/lib{}.dylib", package.replace('-', "_"));
         self.fetch(&library)?;
         Ok(self.root.join(library))
     }

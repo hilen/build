@@ -22,7 +22,8 @@ use crate::{
 };
 
 /// The device the last `make device` of an app went to, below its root.
-const KEPT: &str = "target/hot/device";
+/// Not `target/hot/device`, that is the folder of the loader build.
+const KEPT: &str = "target/hot/picked-device";
 /// Names the engine repo when it is not found above the app.
 const ENGINE_ENV: &str = "HILEN_REPO";
 const ENGINE_CRATE: &str = "hilen/Cargo.toml";
@@ -61,9 +62,11 @@ impl Device {
     /// the address an app answers at, with a tab between them.
     fn from_line(line: &str, inspect: &Path) -> Result<Self> {
         let parts: Vec<&str> = line.split('\t').collect();
-        let [id, kind, name, addr] = parts[..] else {
+        // A newer tool prints more columns between the name and the address.
+        if parts.len() < 4 {
             bail!("`hilen-inspect devices` printed a line that is no device: {line}");
-        };
+        }
+        let (id, kind, name, addr) = (parts[0], parts[1], parts[2], parts[parts.len() - 1]);
         Ok(Self {
             id:      id.to_string(),
             name:    name.to_string(),
