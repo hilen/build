@@ -19,6 +19,13 @@ tvos-lib:
 hot:
 	rust ./build/ios/hot.rs $(args)
 
+# The app of this folder on a paired iPhone, iPad or Apple TV, as a hot build
+# with no install: `make device`. args=tv picks the device by a part of its
+# name or kind, args=install puts the loader on it once, args=status asks it.
+# See hilen docs/hot-reload.md.
+device:
+	rust ./build/ios/device.rs $(args)
+
 # 1 loader in the iOS simulator that swaps between several apps, on a command:
 # make swap args="start demo ../apps/skaityk", then args="to skaityk",
 # args="status" and args="stop". With `tv` as the first word it is the Apple

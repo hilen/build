@@ -11,7 +11,7 @@
 
 use std::{
     env::current_dir,
-    fs::{create_dir_all, read_to_string, remove_file, write},
+    fs::{create_dir_all, metadata, read_to_string, remove_file, write},
     path::{Path, PathBuf},
     thread::sleep,
     time::Duration,
@@ -22,7 +22,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     config,
-    hot::{Hot, System, is_alive, memory_mb, open_files, paired, sign_library, thread_count},
+    device::Device,
+    hot::{Hot, System, is_alive, memory_mb, open_files, sign_library, thread_count},
     run::{run, run_allow_fail},
 };
 
@@ -189,18 +190,18 @@ impl Swap {
         Ok(())
     }
 
-    /// Builds the loader for a real iPhone or Apple TV with the app of this
-    /// repo inside, installs it on the paired device and starts it. The
-    /// loader has the bundle id of this repo, see "A real iPhone" in
+    /// Builds the loader for a real iPhone, iPad or Apple TV with the app
+    /// of this repo inside, installs it on `device` and starts it. The
+    /// loader has the bundle id of this repo, see "A real device" in
     /// docs/hot-reload.md.
-    pub fn device_install(&self) -> Result<()> {
+    pub fn device_install(&self, device: &Device) -> Result<()> {
         let config = config::read()?;
         let app = App {
             name: config.app_name,
             root: self.here.clone(),
         };
 
-        step(&format!("building {} for the device", app.name));
+        step(&format!("building {} for {}", app.name, device.name));
         let library = self.build_for_device(&app)?;
 
         step("building the loader");
@@ -208,40 +209,46 @@ impl Swap {
             .for_system(self.system)
             .build_device_loader(&library)?;
 
-        step("installing on the device");
-        let device = paired(self.system)?;
-        run(&format!("xcrun devicectl device install app --device {device} \"{}\"", loader.display()))?;
+        step(&format!("installing on {}", device.name));
+        let id = &device.id;
+        run(&format!("xcrun devicectl device install app --device {id} \"{}\"", loader.display()))?;
         run(&format!(
-            "xcrun devicectl device process launch --device {device} --terminate-existing {}",
+            "xcrun devicectl device process launch --device {id} --terminate-existing {}",
             config.bundle_id
         ))
     }
 
-    /// Builds the app in `folder` and swaps the loader on the device to it.
-    pub fn device_to(&self, folder: &str) -> Result<()> {
-        let app = App::find(folder)?;
+    /// Builds the app in `folder`, with none the app of this repo, and
+    /// swaps the loader on `device` to it. A loader that does not answer
+    /// is started first.
+    pub fn device_to(&self, folder: Option<&str>, device: &Device) -> Result<()> {
+        let config = config::read()?;
+        let app = match folder {
+            Some(folder) => App::find(folder)?,
+            None => App {
+                name: config.app_name,
+                root: self.here.clone(),
+            },
+        };
 
-        step(&format!("building {} for the device", app.name));
+        step(&format!("building {} for {}", app.name, device.name));
         let library = self.build_for_device(&app)?;
         sign_library(&library)?;
 
-        step(&format!("sending {} to the device", app.name));
-        let inspect = self.inspect()?;
+        device.wake(&config.bundle_id)?;
+
+        step(&format!("sending {} to {}", app.name, device.name));
         let assets = app.root.join("assets");
         let assets = if assets.is_dir() { format!(" --assets \"{}\"", assets.display()) } else { String::new() };
-        run(&format!("\"{}\" hot-send \"{}\" {}{assets}", inspect.display(), library.display(), app.name))
+        run(&device.inspect(&format!("hot-send \"{}\" {}{assets}", library.display(), app.name)))?;
+
+        step(&format!("{} runs {}, the inspector reaches it with:", device.name, app.name));
+        println!("{}", device.inspect("tree"));
+        Ok(())
     }
 
-    pub fn device_status(&self) -> Result<()> {
-        run(&format!("\"{}\" hot-status", self.inspect()?.display()))
-    }
-
-    /// The inspect tool of this repo, built with the engine of this folder,
-    /// so both sides of a send speak the same protocol.
-    fn inspect(&self) -> Result<PathBuf> {
-        let hot = Hot::at(&self.here, EXECUTABLE, BUNDLE_ID);
-        hot.build_tool("hilen-inspect", INSPECT)?;
-        Ok(self.here.join(INSPECT))
+    pub fn device_status(&self, device: &Device) -> Result<()> {
+        run(&device.inspect("hot-status"))
     }
 
     fn build_for_device(&self, app: &App) -> Result<PathBuf> {
@@ -283,6 +290,19 @@ impl Swap {
         write(self.state_file(), serde_json::to_string_pretty(state)?)?;
         Ok(())
     }
+}
+
+/// The inspect tool of the engine repo `here`, built with the engine of
+/// that folder, so both sides of a send speak the same protocol. It is
+/// built again only after a source of the repo was saved.
+pub(crate) fn inspect_tool(here: &Path) -> Result<PathBuf> {
+    let hot = Hot::at(here, EXECUTABLE, BUNDLE_ID);
+    let tool = here.join(INSPECT);
+    let built = metadata(&tool).and_then(|meta| meta.modified()).ok();
+    if built.is_none_or(|built| hot.sources().is_ok_and(|(_, saved)| saved > built)) {
+        hot.build_tool("hilen-inspect", INSPECT)?;
+    }
+    Ok(tool)
 }
 
 fn step(message: &str) {

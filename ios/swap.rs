@@ -5,10 +5,10 @@
 //
 // Every command returns, so a person and an agent use it the same way.
 
-use std::env::args;
+use std::env::{args, current_dir};
 
 use anyhow::{Result, bail};
-use shared::{hot::System, swap::Swap};
+use shared::{device::Device, hot::System, swap::Swap};
 
 const USAGE: &str = r"swap between apps in 1 process of the iOS simulator
 
@@ -24,17 +24,14 @@ the same in the Apple TV simulator, with the word tv in front:
   tv status
   tv stop
 
-on a real Apple TV, paired with this Mac and on the same network:
-
-  tv device install           like phone install
-  tv device <folder>          like phone <folder>
-  tv device status            like phone status
-
-on a real iPhone, plugged in for the install, on the same network after it:
+on a real device `make device` in the folder of an app does all of this by
+itself. The words here stay for a run from the engine repo, `phone` is the
+paired iPhone and `tv device` the paired Apple TV:
 
   phone install               build the loader with the app of this repo, install and start it
   phone <folder>              build the app and swap the phone to it
   phone status                the library the loader on the phone runs
+  tv device install | <folder> | status
 
 A folder is the folder of the app crate. A name is its cargo package.";
 
@@ -50,10 +47,12 @@ fn main() -> Result<()> {
         "status" if args.len() == 1 => swap.status(),
         "stop" if args.len() == 1 => swap.stop(),
         "phone" | "device" if args.len() == 2 && (command == "device") == (system == System::Tvos) => {
+            let kind = if system == System::Tvos { "appleTV" } else { "iPhone" };
+            let device = Device::pick(&current_dir()?, Some(kind))?;
             match args[1].as_str() {
-                "install" => swap.device_install(),
-                "status" => swap.device_status(),
-                folder => swap.device_to(folder),
+                "install" => swap.device_install(&device),
+                "status" => swap.device_status(&device),
+                folder => swap.device_to(Some(folder), &device),
             }
         }
         _ => {
