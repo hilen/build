@@ -53,7 +53,6 @@ fn main() -> Result<()> {
 
     let mut args: Vec<String> = args().skip(1).collect();
     let hot = Hot::named(EXECUTABLE, BUNDLE_ID)?.for_system(System::take(&mut args));
-    hot.prepare()?;
 
     // Both builds land in the same file, so each is put aside.
     let mut libraries = vec![];

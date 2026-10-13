@@ -31,6 +31,36 @@ const TV_KIND: &str = "appleTV";
 /// A started loader needs a moment until it answers.
 const WAKE_TRIES: u32 = 20;
 const WAKE_POLL: Duration = Duration::from_secs(1);
+/// `hot-status` of a hot build names its library.
+const HOT_MARK: &str = "library";
+/// `build-time` of any app that answers the inspector starts with this.
+const APP_MARK: &str = "app code built";
+/// An app has to answer as no hot build this many times in a row before it
+/// is taken for one, a loader in its start may answer in between.
+const PLAIN_TRIES: u32 = 2;
+
+/// What answers on a device after the start of the loader.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Woke {
+    /// A hot build, it takes a library.
+    Hot,
+    /// An app that answers the inspector and is no hot build. No wait
+    /// changes that, the loader has to be installed again. Once such an
+    /// app sat on a phone and the send waited 90 seconds on it for nothing.
+    Plain,
+}
+
+/// What the answers of the inspect tool say about the app in front,
+/// nothing while it does not answer at all.
+fn seen(status: &str, build_time: &str) -> Option<Woke> {
+    if status.contains(HOT_MARK) {
+        Some(Woke::Hot)
+    } else if build_time.contains(APP_MARK) {
+        Some(Woke::Plain)
+    } else {
+        None
+    }
+}
 
 pub struct Device {
     /// The id every `devicectl` command takes.
@@ -86,13 +116,20 @@ impl Device {
         format!("\"{}\" --device {} {command}", self.inspect.display(), self.id)
     }
 
-    /// Starts the loader `bundle_id` when no app answers on the device,
-    /// and waits until it does.
-    pub fn wake(&self, bundle_id: &str) -> Result<()> {
-        if self.answers {
-            return Ok(());
+    fn ask(&self) -> Option<Woke> {
+        let status = probe(&self.inspect("hot-status"));
+        let build_time =
+            if status.contains(HOT_MARK) { String::new() } else { probe(&self.inspect("build-time")) };
+        seen(&status, &build_time)
+    }
+
+    /// Starts the loader `bundle_id` when no hot build answers on the
+    /// device, and waits until one does.
+    pub fn wake(&self, bundle_id: &str) -> Result<Woke> {
+        if self.answers && self.ask() == Some(Woke::Hot) {
+            return Ok(Woke::Hot);
         }
-        println!("\n[device] no app answers on {}, starting the loader", self.name);
+        println!("\n[device] no hot build answers on {}, starting the loader", self.name);
         run(&format!("xcrun devicectl device process launch --device {} --terminate-existing {bundle_id}", self.id))
             .with_context(|| {
                 format!(
@@ -100,10 +137,23 @@ impl Device {
                     self.name
                 )
             })?;
+        self.wait()
+    }
+
+    /// Waits until the loader that was just started answers.
+    pub fn wait(&self) -> Result<Woke> {
+        let mut plain = 0;
         for _ in 0..WAKE_TRIES {
             sleep(WAKE_POLL);
-            if probe(&self.inspect("hot-status")).contains("library") {
-                return Ok(());
+            match self.ask() {
+                Some(Woke::Hot) => return Ok(Woke::Hot),
+                Some(Woke::Plain) => {
+                    plain += 1;
+                    if plain == PLAIN_TRIES {
+                        return Ok(Woke::Plain);
+                    }
+                }
+                None => plain = 0,
             }
         }
         bail!("the loader on {} was started, but it does not answer. Keep the device unlocked with the loader in front", self.name)
@@ -185,6 +235,18 @@ mod tests {
 
         assert!(Device::from_line("no tabs here", tool).is_err());
         Ok(())
+    }
+
+    #[test]
+    fn an_app_that_answers_with_no_library_is_no_hot_build() {
+        let hot = "loader   given at 192.168.0.208:7435\nlibrary  1791881864812.dylib";
+        let none = "Error: No hot build answers on My iPhone.";
+        let stamp = "app code built: 1791644213\napp started:    1791881508";
+        let asleep = "Error: The app took the connection and gave no answer";
+
+        assert_eq!(seen(hot, ""), Some(Woke::Hot));
+        assert_eq!(seen(none, stamp), Some(Woke::Plain));
+        assert_eq!(seen(none, asleep), None);
     }
 
     #[test]

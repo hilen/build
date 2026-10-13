@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     config,
-    device::Device,
+    device::{Device, Woke},
     hot::{Hot, System, is_alive, memory_mb, open_files, sign_library, thread_count},
     run::{run, run_allow_fail},
 };
@@ -235,7 +235,16 @@ impl Swap {
         let library = self.build_for_device(&app)?;
         sign_library(&library)?;
 
-        device.wake(&config.bundle_id)?;
+        if device.wake(&config.bundle_id)? == Woke::Plain {
+            step(&format!(
+                "the app in front on {} is no hot build, installing the loader again",
+                device.name
+            ));
+            self.device_install(device)?;
+            if device.wait()? == Woke::Plain {
+                bail!("the new loader on {} is no hot build either", device.name);
+            }
+        }
 
         step(&format!("sending {} to {}", app.name, device.name));
         let assets = app.root.join("assets");
@@ -254,7 +263,6 @@ impl Swap {
     fn build_for_device(&self, app: &App) -> Result<PathBuf> {
         let hot = Hot::at(&app.root, EXECUTABLE, BUNDLE_ID).for_system(self.system).for_device();
         let hot = self.with_engine(hot, app);
-        hot.prepare()?;
         hot.build_library(&app.name, "")
     }
 
@@ -272,7 +280,6 @@ impl Swap {
     fn build(&self, app: &App) -> Result<PathBuf> {
         let hot = Hot::at(&app.root, EXECUTABLE, BUNDLE_ID).for_system(self.system);
         let hot = self.with_engine(hot, app);
-        hot.prepare()?;
         hot.build_library(&app.name, "")
     }
 

@@ -271,13 +271,15 @@ impl Hot {
         Ok(())
     }
 
-    pub fn prepare(&self) -> Result<()> {
-        let line = match self.system {
+    /// What the toolchain of the builder needs for the build. It is a part
+    /// of the build line: as a job of its own it cost every build about a
+    /// second on a machine that builds through far.
+    fn prepare(&self) -> String {
+        match self.system {
             System::Ios => format!("rustup target add {}", self.target()),
             // A tvOS target cannot be added, it is built from the sources.
             System::Tvos => "rustup component add rust-src".to_string(),
-        };
-        run(&self.on_builder(&line))
+        }
     }
 
     /// Builds `package` as 1 dynamic library with the engine inside and
@@ -309,6 +311,7 @@ impl Hot {
             }
             None => format!("{exports}; {cargo}"),
         };
+        let line = format!("{} || exit 1; {line}", self.prepare());
         self.send_engine()?;
         run(&self.on_builder(&line))?;
 

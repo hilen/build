@@ -31,7 +31,6 @@ fn main() -> Result<()> {
     let hot = Hot::new(&config)?.for_system(System::take(&mut args));
 
     step("building the library");
-    hot.prepare()?;
     let library = hot.build_library(&config.app_name, "")?;
     hot.publish(&library, None)?;
 
