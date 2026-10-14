@@ -6,15 +6,18 @@
 //   <name>-<v>-linux-<arch>.deb        first install, updates through apt
 //   <name>-<v>-linux-<arch>.AppImage   signed, self updates in place
 //   <name>-<v>-linux-<triple-arch>     the bare binary, signed for the manifest
-//   <daemon>-<v>-linux-<triple-arch>   each daemon of `daemons`, bare and signed
+//   <daemon>-<v>-linux-<triple-arch>   each daemon of `daemons`, bare and
+// signed
 
 mod docker;
 
 use anyhow::{Result, bail};
 
 const STAGE: &str = "target/linux-stage";
-use shared::inspect;
-use shared::release::{self, Release};
+use shared::{
+    inspect,
+    release::{self, Release},
+};
 
 fn main() -> Result<()> {
     inspect::mark_release();
@@ -102,13 +105,12 @@ fn write_desktop_file(r: &Release) -> Result<()> {
             r#"[Desktop Entry]
 Type=Application
 Name={name}
-Exec={bin}
-Icon={name}
+{exec}Icon={name}
 Categories=Development;
 Terminal=false
 "#,
             name = r.name,
-            bin = r.bin
+            exec = shared::links::desktop_lines(&r.bin, r.link_scheme.as_deref())
         ),
     )?;
     Ok(())

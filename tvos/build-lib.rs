@@ -1,8 +1,11 @@
 #!/usr/bin/env rust
 
 use anyhow::Result;
-use shared::run::{has, run};
-use shared::{config, inspect, tvos};
+use shared::{
+    config, inspect,
+    run::{has, run, run_with_input},
+    secrets, tvos,
+};
 
 fn main() -> Result<()> {
     let config = config::read()?;
@@ -23,14 +26,37 @@ fn main() -> Result<()> {
         tvos::DEVICE,
         tvos::SIMULATOR
     );
+    let release = inspect::is_release();
+    let key = if release {
+        secrets::session_key(&config)?
+    } else {
+        None
+    };
+    if let Some(key) = &key {
+        // Read by the build here, and by the output mask of the far job.
+        unsafe {
+            std::env::set_var(secrets::SESSION_KEY_ENV, key);
+        }
+    }
     if has("cargo") {
-        run(&build)?;
+        match key {
+            Some(_) => run(&secrets::masked(&build))?,
+            None => run(&build)?,
+        }
     } else {
         // No Rust toolchain here. The libs are built on a mac builder and come
-        // back, Xcode on this machine then links them.
-        run(&format!("far --on mac '{build}'"))?;
+        // back, Xcode on this machine then links them. far does not pass the
+        // environment on, a shipped build gets its marks in the job itself.
+        match &key {
+            Some(key) => run_with_input(&secrets::far_job(&build, Some(key)), key)?,
+            None if release => run(&secrets::far_job(&build, None))?,
+            None => run(&format!("far --on mac '{build}'"))?,
+        }
         for target in [tvos::DEVICE, tvos::SIMULATOR] {
-            run(&format!("far --on mac get {}", tvos::lib(target, &config.lib_name)))?;
+            run(&format!(
+                "far --on mac get {}",
+                tvos::lib(target, &config.lib_name)
+            ))?;
         }
     }
     // A test build of demo carries the inspect server on purpose, only a

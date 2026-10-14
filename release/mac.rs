@@ -11,9 +11,11 @@
 //   <daemon>-<v>-macos-<arch>      each daemon of `daemons`, bare and signed
 
 use anyhow::{Context, Result, bail};
-use shared::inspect;
-use shared::release::{self, Release};
-use shared::run::{capture, run, run_secret};
+use shared::{
+    inspect,
+    release::{self, Release},
+    run::{capture, run, run_secret},
+};
 
 const NOTARIZE_LIMIT_SECS: u32 = 900;
 
@@ -22,7 +24,8 @@ fn main() -> Result<()> {
     let r = release::read()?;
     let arch = r.mac_arch()?;
     std::fs::create_dir_all("dist")?;
-    // lipo writes here, and a fresh checkout that only built with --target has no such folder yet.
+    // lipo writes here, and a fresh checkout that only built with --target has
+    // no such folder yet.
     std::fs::create_dir_all("target/release")?;
     let signing = std::env::var("APPLE_SIGNING_IDENTITY").ok().filter(|s| !s.is_empty());
     if signing.is_none() && std::env::var("CI").is_ok() {
@@ -59,7 +62,9 @@ fn main() -> Result<()> {
         run(&format!(
             r#"codesign --force --deep --options runtime --timestamp --sign "{identity}" "{app}""#
         ))?;
-        run(&format!(r#"codesign --force --options runtime --timestamp --sign "{identity}" "{universal}""#))?;
+        run(&format!(
+            r#"codesign --force --options runtime --timestamp --sign "{identity}" "{universal}""#
+        ))?;
         notarize_app(&app)?;
     }
 
@@ -93,7 +98,9 @@ fn main() -> Result<()> {
         run(&format!("lipo -create -output {universal} {}", slices.join(" ")))?;
         inspect::refuse(&universal)?;
         if let Some(identity) = &signing {
-            run(&format!(r#"codesign --force --options runtime --timestamp --sign "{identity}" "{universal}""#))?;
+            run(&format!(
+                r#"codesign --force --options runtime --timestamp --sign "{identity}" "{universal}""#
+            ))?;
         }
         let bare = format!("dist/{}", daemon.artifact(&format!("macos-{arch}")));
         std::fs::copy(&universal, &bare)?;
@@ -104,7 +111,8 @@ fn main() -> Result<()> {
 }
 
 fn unlock_keychain() -> Result<()> {
-    // The password stays a shell variable, so it is never part of a printed command.
+    // The password stays a shell variable, so it is never part of a printed
+    // command.
     std::env::var("APPLE_CI_KEYCHAIN_PASSWORD").context("APPLE_CI_KEYCHAIN_PASSWORD")?;
     let keychain = "~/Library/Keychains/ci-signing.keychain-db";
     run_secret(&format!(
@@ -128,7 +136,8 @@ fn bundle(r: &Release, universal: &str) -> Result<String> {
     std::fs::create_dir_all(format!("{contents}/MacOS"))?;
     std::fs::create_dir_all(format!("{contents}/Resources"))?;
     std::fs::copy(universal, format!("{contents}/MacOS/{}", r.name))?;
-    std::fs::copy("assets/icon.icns", format!("{contents}/Resources/icon.icns")).context("assets/icon.icns")?;
+    std::fs::copy("assets/icon.icns", format!("{contents}/Resources/icon.icns"))
+        .context("assets/icon.icns")?;
     std::fs::write(format!("{contents}/Info.plist"), info_plist(r))?;
     Ok(app)
 }
@@ -150,12 +159,17 @@ fn info_plist(r: &Release) -> String {
   <key>LSMinimumSystemVersion</key><string>11.0</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
   <key>NSHighResolutionCapable</key><true/>
-</dict>
+{links}</dict>
 </plist>
 "#,
         name = r.name,
         bundle_id = r.bundle_id,
-        version = r.version
+        version = r.version,
+        links = r
+            .link_scheme
+            .as_deref()
+            .map(|scheme| shared::links::plist_lines(scheme, &r.bundle_id))
+            .unwrap_or_default()
     )
 }
 

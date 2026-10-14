@@ -7,32 +7,35 @@ use anyhow::{Context, Result};
 
 pub struct Config {
     /// cargo package name, and the Android lib name
-    pub app_name: String,
+    pub app_name:             String,
     /// Xcode project, scheme and target name
-    pub project_name: String,
+    pub project_name:         String,
     /// the staticlib cargo lipo produces, which the Xcode project links
-    pub lib_name: String,
-    pub bundle_id: String,
-    /// CFBundleShortVersionString for the iOS build. hilen-mobile bakes 1.0 into
-    /// the generated Info.plist with no knob, so the build patches it from this
-    /// value. The App Store rejects an upload whose version is not higher than
-    /// the live one.
-    pub version: String,
+    pub lib_name:             String,
+    pub bundle_id:            String,
+    /// CFBundleShortVersionString for the iOS build. hilen-mobile bakes 1.0
+    /// into the generated Info.plist with no knob, so the build patches it
+    /// from this value. The App Store rejects an upload whose version is
+    /// not higher than the live one.
+    pub version:              String,
     /// Minimum iOS version written into every generated Xcode configuration.
     /// App Store Connect rejects an upload that targets below iOS 13.
-    pub ios_minimum_version: String,
+    pub ios_minimum_version:  String,
     /// Minimum tvOS version, for the Rust libs and the generated Xcode project.
     pub tvos_minimum_version: String,
     /// The app also ships for an Apple TV, `tvos = true` in hilen.toml.
     /// `make fly` then uploads a tvOS build too.
-    pub tvos: bool,
+    pub tvos:                 bool,
+    /// The Infisical project of the app, `infisical_project` in hilen.toml.
+    /// A phone build reads its HILEN_SESSION_KEY from there.
+    pub infisical_project:    Option<String>,
 }
 
 /// Read from the repo root. Several scripts chdir into mobile/iOS partway
 /// through, so read this before that happens, not lazily after.
 pub fn read() -> Result<Config> {
-    let text = std::fs::read_to_string("hilen.toml")
-        .context("hilen.toml not found, run this from the repo root")?;
+    let text =
+        std::fs::read_to_string("hilen.toml").context("hilen.toml not found, run this from the repo root")?;
     let value: serde_json::Value = toml::from_str(&text)?;
 
     let project = value
@@ -45,31 +48,27 @@ pub fn read() -> Result<Config> {
         .context("bundle_id not found in hilen.toml")?
         .as_str()
         .unwrap_or_default();
-    let version = value
-        .get("version")
-        .and_then(|v| v.as_str())
-        .unwrap_or("1.0");
-    let ios_minimum_version = value
-        .get("ios_minimum_version")
-        .and_then(|v| v.as_str())
-        .unwrap_or("13.0");
-    let tvos_minimum_version = value
-        .get("tvos_minimum_version")
-        .and_then(|v| v.as_str())
-        .unwrap_or("15.0");
+    let version = value.get("version").and_then(|v| v.as_str()).unwrap_or("1.0");
+    let ios_minimum_version = value.get("ios_minimum_version").and_then(|v| v.as_str()).unwrap_or("13.0");
+    let tvos_minimum_version = value.get("tvos_minimum_version").and_then(|v| v.as_str()).unwrap_or("15.0");
 
     let parts = words(project);
     let snake = parts.join("_");
 
     Ok(Config {
-        app_name: parts.join("-"),
-        project_name: parts.iter().map(|w| capitalize(w)).collect::<String>(),
-        lib_name: format!("lib{snake}.a"),
-        bundle_id: bundle_id.to_string(),
-        version: version.to_string(),
-        ios_minimum_version: ios_minimum_version.to_string(),
+        app_name:             parts.join("-"),
+        project_name:         parts.iter().map(|w| capitalize(w)).collect::<String>(),
+        lib_name:             format!("lib{snake}.a"),
+        bundle_id:            bundle_id.to_string(),
+        version:              version.to_string(),
+        ios_minimum_version:  ios_minimum_version.to_string(),
         tvos_minimum_version: tvos_minimum_version.to_string(),
-        tvos: value.get("tvos").and_then(serde_json::Value::as_bool).unwrap_or(false),
+        tvos:                 value.get("tvos").and_then(serde_json::Value::as_bool).unwrap_or(false),
+        infisical_project:    value
+            .get("infisical_project")
+            .and_then(serde_json::Value::as_str)
+            .filter(|project| !project.is_empty())
+            .map(str::to_owned),
     })
 }
 

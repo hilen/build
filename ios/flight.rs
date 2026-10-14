@@ -4,7 +4,7 @@ use std::fs::read_to_string;
 
 use anyhow::{Result, ensure};
 use shared::{
-    config, ios,
+    config, inspect, ios,
     run::{capture, run},
 };
 
@@ -14,6 +14,9 @@ const INFISICAL_PROJECT: &str = "e2dd64d9-130c-4072-bd3d-0a98331364cb";
 fn main() -> Result<()> {
     let config = config::read()?;
 
+    // An upload is a shipped build: the lib gets the session key of the app
+    // and the engine refuses the inspect server in it.
+    inspect::mark_release();
     run("rust ./build/ios/build-project.rs")?;
 
     unsafe {
@@ -46,7 +49,9 @@ fn main() -> Result<()> {
 -sdk iphoneos -configuration Release archive -archivePath \"{archive_path}\" \
 OTHER_LDFLAGS=\"{}\" \
 -allowProvisioningUpdates",
-        config.project_name, config.project_name, ios::LDFLAGS
+        config.project_name,
+        config.project_name,
+        ios::LDFLAGS
     ))?;
     println!("build: OK");
 

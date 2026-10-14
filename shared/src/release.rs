@@ -10,29 +10,32 @@ use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
 use crate::{
-    config,
+    config, links,
     run::{capture, run},
 };
 
 pub struct Release {
     /// cargo package name, the artifact file name prefix
-    pub name: String,
+    pub name:            String,
     /// the binary target of that package, the file name cargo builds
-    pub bin: String,
-    pub version: String,
-    pub bundle_id: String,
+    pub bin:             String,
+    pub version:         String,
+    pub bundle_id:       String,
     /// where the binaries are served, no trailing slash
-    pub download_url: String,
+    pub download_url:    String,
     /// the beekeeper deployment whose data/download/ holds the binaries
     pub host_deployment: String,
     /// subdirectory under that data/download/
-    pub target_subdir: String,
-    /// the targets of the mac build, more than 1 is glued into a universal binary
-    pub mac_targets: Vec<String>,
+    pub target_subdir:   String,
+    /// the targets of the mac build, more than 1 is glued into a universal
+    /// binary
+    pub mac_targets:     Vec<String>,
     /// false for an app without the engine updater, its binaries are not signed
-    pub self_update: bool,
+    pub self_update:     bool,
     /// the daemons of the app, each a bare signed binary per platform
-    pub daemons: Vec<Daemon>,
+    pub daemons:         Vec<Daemon>,
+    /// the url scheme of the `[links]` table, registered by the packaging
+    pub link_scheme:     Option<String>,
 }
 
 /// A second product of an app, a binary with no window that updates itself
@@ -41,9 +44,9 @@ pub struct Release {
 /// app's. Named in `daemons` of the `[release]` table by its package name.
 pub struct Daemon {
     /// cargo package name, the artifact file name prefix
-    pub name: String,
+    pub name:    String,
     /// the binary target of that package, the file name cargo builds
-    pub bin: String,
+    pub bin:     String,
     pub version: String,
 }
 
@@ -96,22 +99,25 @@ struct Hilen {
 /// folder. An app that still ships from another deployment names it here.
 #[derive(Deserialize)]
 struct Distribution {
-    download_url: Option<String>,
+    download_url:    Option<String>,
     host_deployment: Option<String>,
-    target_subdir: Option<String>,
+    target_subdir:   Option<String>,
     #[serde(default = "yes")]
-    self_update: bool,
+    self_update:     bool,
     #[serde(default = "universal")]
-    mac_targets: Vec<String>,
+    mac_targets:     Vec<String>,
     #[serde(default)]
-    daemons: Vec<String>,
+    daemons:         Vec<String>,
 }
 
 const DOWNLOAD_HOST: &str = "https://get.vladas.xyz";
 const DOWNLOAD_DEPLOYMENT: &str = "get";
 
 fn universal() -> Vec<String> {
-    vec!["aarch64-apple-darwin".to_string(), "x86_64-apple-darwin".to_string()]
+    vec![
+        "aarch64-apple-darwin".to_string(),
+        "x86_64-apple-darwin".to_string(),
+    ]
 }
 
 fn yes() -> bool {
@@ -125,7 +131,7 @@ struct Metadata {
 
 #[derive(Deserialize)]
 struct Package {
-    name: String,
+    name:    String,
     version: String,
     targets: Vec<Target>,
 }
@@ -139,11 +145,11 @@ struct Target {
 /// Read from the repo root, before any chdir.
 pub fn read() -> Result<Release> {
     let config = config::read()?;
-    let hilen: Hilen =
-        toml::from_str(&read_to_string("hilen.toml")?).context("[release] table in hilen.toml")?;
+    let text = read_to_string("hilen.toml")?;
+    let hilen: Hilen = toml::from_str(&text).context("[release] table in hilen.toml")?;
+    let link_scheme = links::scheme_of(&text)?;
 
-    let metadata: Metadata =
-        serde_json::from_str(&capture("cargo metadata --no-deps --format-version 1")?)?;
+    let metadata: Metadata = serde_json::from_str(&capture("cargo metadata --no-deps --format-version 1")?)?;
     let release = hilen.release;
     let daemons = release
         .daemons
@@ -152,8 +158,8 @@ pub fn read() -> Result<Release> {
             let package = find_package(&metadata.packages, name)
                 .with_context(|| format!("no cargo package named {name}, listed in daemons of hilen.toml"))?;
             Ok(Daemon {
-                name: package.name.clone(),
-                bin: pick_bin(package)?,
+                name:    package.name.clone(),
+                bin:     pick_bin(package)?,
                 version: package.version.clone(),
             })
         })
@@ -170,6 +176,7 @@ pub fn read() -> Result<Release> {
 
     Ok(Release {
         daemons,
+        link_scheme,
         download_url: release.download_url.map_or_else(
             || format!("{DOWNLOAD_HOST}/{name}"),
             |url| url.trim_end_matches('/').to_string(),

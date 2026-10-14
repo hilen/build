@@ -4,7 +4,8 @@
 // NSIS. `--arch x64|arm64`, default both. Outputs in dist/:
 //   <name>-<v>-windows-<arch>-setup.exe   first install
 //   <name>-<v>-windows-<arch>.exe         the bare exe the updater swaps in
-//   <daemon>-<v>-windows-<arch>.exe       each daemon of `daemons`, bare and signed
+//   <daemon>-<v>-windows-<arch>.exe       each daemon of `daemons`, bare and
+// signed
 
 mod docker;
 
@@ -41,11 +42,17 @@ fn main() -> Result<()> {
     let platform = "linux/amd64";
     docker::build_image(&image, "Dockerfile.windows", platform)?;
     let mut script = String::from("set -euo pipefail\nrustup component add rust-src\n");
+    // The installer registers the url scheme of the app when it has one.
+    let scheme = r
+        .link_scheme
+        .as_deref()
+        .map(|scheme| format!("-DSCHEME={scheme} "))
+        .unwrap_or_default();
     for (arch, triple) in &targets {
         script.push_str(&format!(
             r#"rustup target add {triple}
 cargo xwin build --locked --release -p {name} --bin {bin} --target {triple}
-makensis -DNAME={name} -DVERSION={version} -DEXE=/work/apps/app/target/release-win/{triple}/release/{bin}.exe -DICON=/work/apps/app/assets/icon.ico -DOUTPUT=/work/apps/app/{stage}/{name}-{arch}-setup.exe build/release/installer.nsi
+makensis {scheme}-DNAME={name} -DVERSION={version} -DEXE=/work/apps/app/target/release-win/{triple}/release/{bin}.exe -DICON=/work/apps/app/assets/icon.ico -DOUTPUT=/work/apps/app/{stage}/{name}-{arch}-setup.exe build/release/installer.nsi
 cp /work/apps/app/target/release-win/{triple}/release/{bin}.exe /work/apps/app/{stage}/{name}-{arch}.exe
 "#,
             name = r.name,

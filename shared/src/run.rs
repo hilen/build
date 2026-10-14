@@ -37,7 +37,8 @@ pub fn has(program: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Echo the command, run it inheriting the terminal, and fail on a non zero exit.
+/// Echo the command, run it inheriting the terminal, and fail on a non zero
+/// exit.
 pub fn run(cmd: &str) -> Result<()> {
     println!("{cmd}");
     let status = shell(cmd).status()?;
@@ -59,10 +60,7 @@ pub fn run_allow_fail(cmd: &str) {
 /// never reaches the log.
 pub fn capture(cmd: &str) -> Result<String> {
     println!("{cmd}");
-    let out = shell(cmd)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .output()?;
+    let out = shell(cmd).stdout(Stdio::piped()).stderr(Stdio::inherit()).output()?;
     if !out.status.success() {
         bail!("command failed: {cmd}");
     }
@@ -80,8 +78,25 @@ pub fn run_secret(cmd: &str) -> Result<()> {
     Ok(())
 }
 
-/// Capture stdout and stderr together and never fail, for probing commands whose
-/// non zero exit is a normal answer.
+/// Echo the command and run it with `input` and a line end on its stdin. For a
+/// secret the command must not hold on its line.
+pub fn run_with_input(cmd: &str, input: &str) -> Result<()> {
+    use std::io::Write;
+
+    println!("{cmd}");
+    let mut child = shell(cmd).stdin(Stdio::piped()).spawn()?;
+    if let Some(mut stdin) = child.stdin.take() {
+        writeln!(stdin, "{input}")?;
+    }
+    let status = child.wait()?;
+    if !status.success() {
+        bail!("command failed: {cmd}");
+    }
+    Ok(())
+}
+
+/// Capture stdout and stderr together and never fail, for probing commands
+/// whose non zero exit is a normal answer.
 pub fn probe(cmd: &str) -> String {
     let Ok(out) = shell(cmd).output() else {
         return String::new();
@@ -108,8 +123,9 @@ pub fn run_quiet(cmd: &str) -> Result<String> {
 mod tests {
     use super::*;
 
-    // Windows quoted the whole command for cmd with `\"` escapes, which cmd does
-    // not know, so a quoted argument with a space reached git as two words.
+    // Windows quoted the whole command for cmd with `\"` escapes, which cmd
+    // does not know, so a quoted argument with a space reached git as two
+    // words.
     #[test]
     fn a_quoted_argument_stays_one_argument() -> Result<()> {
         let out = capture(r#"git config --default "release v1.2.3" --get shared.test.missing"#)?;
