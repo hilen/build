@@ -5,6 +5,8 @@
 
 use anyhow::{Context, Result};
 
+use crate::local_network::LocalNetwork;
+
 pub struct Config {
     /// cargo package name, and the Android lib name
     pub app_name:             String,
@@ -29,6 +31,9 @@ pub struct Config {
     /// The Infisical project of the app, `infisical_project` in hilen.toml.
     /// A phone build reads its HILEN_SESSION_KEY from there.
     pub infisical_project:    Option<String>,
+    /// The `[local_network]` table, for an app that finds devices on the
+    /// local network.
+    pub local_network:        Option<LocalNetwork>,
 }
 
 /// Read from the repo root. Several scripts chdir into mobile/iOS partway
@@ -69,6 +74,7 @@ pub fn read() -> Result<Config> {
             .and_then(serde_json::Value::as_str)
             .filter(|project| !project.is_empty())
             .map(str::to_owned),
+        local_network:        LocalNetwork::read(&value)?,
     })
 }
 

@@ -1,7 +1,11 @@
 #!/usr/bin/env rust
 
 use anyhow::{Result, bail};
-use shared::{config, inspect};
+use shared::{
+    config::{self, Config},
+    inspect,
+    local_network::MULTICAST_PERMISSION,
+};
 use shared::run::{probe, run};
 
 fn main() -> Result<()> {
@@ -44,7 +48,7 @@ fn main() -> Result<()> {
     println!("arch: {}", std::env::consts::ARCH);
 
     if android {
-        return build_android();
+        return build_android(&config);
     }
 
     if is_linux {
@@ -71,7 +75,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn build_android() -> Result<()> {
+fn build_android(config: &Config) -> Result<()> {
     run("rustup toolchain install")?;
     run(
         "rustup target add armv7-linux-androideabi aarch64-linux-android \
@@ -81,7 +85,7 @@ i686-linux-android x86_64-linux-android",
     run("cargo install hilen-mobile --locked")?;
     run("hilen-mobile")?;
 
-    fix_generated_project()?;
+    fix_generated_project(config)?;
 
     let abi = std::env::var("HILEN_ANDROID_ABI").unwrap_or_default();
     if !abi.is_empty() {
@@ -119,7 +123,7 @@ i686-linux-android x86_64-linux-android",
 /// The pending template fixes from docs/android.md. The template still misses
 /// them, so a regeneration reverts them and they are reapplied after every
 /// one. Each replace skips silently once the template itself carries the fix.
-fn fix_generated_project() -> Result<()> {
+fn fix_generated_project(config: &Config) -> Result<()> {
     let gradle = "mobile/android/app/build.gradle.kts";
     let content = std::fs::read_to_string(gradle)?;
 
@@ -169,6 +173,37 @@ fn fix_generated_project() -> Result<()> {
             "    <uses-permission android:name=\"android.permission.INTERNET\"/>
 
     <application",
+        )?;
+        std::fs::write(manifest, content)?;
+    }
+
+    // The camera of an app with a `[camera]` table, see camera.rs in shared.
+    // The engine asks the user for it while the app runs.
+    if shared::camera::usage_of(&std::fs::read_to_string("hilen.toml")?)?.is_some() {
+        let content = std::fs::read_to_string(manifest)?;
+        if !content.contains(shared::camera::ANDROID_PERMISSION) {
+            let content = replace_once(
+                manifest,
+                content,
+                "    <application",
+                &format!(
+                    "    <uses-permission android:name=\"{}\"/>\n    <uses-feature android:name=\"android.hardware.camera.any\" android:required=\"false\"/>\n\n    <application",
+                    shared::camera::ANDROID_PERMISSION
+                ),
+            )?;
+            std::fs::write(manifest, content)?;
+        }
+    }
+
+    // Wi-Fi drops multicast unless the app holds a multicast lock, which
+    // the mDNS browse of an app with a [local_network] table takes.
+    if config.local_network.is_some() {
+        let content = std::fs::read_to_string(manifest)?;
+        let content = replace_once(
+            manifest,
+            content,
+            "    <application",
+            &format!("    {MULTICAST_PERMISSION}\n\n    <application"),
         )?;
         std::fs::write(manifest, content)?;
     }

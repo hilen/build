@@ -1,9 +1,12 @@
+pub mod bluetooth;
+pub mod camera;
 pub mod config;
 pub mod device;
 pub mod hot;
 pub mod inspect;
 pub mod ios;
 pub mod links;
+pub mod local_network;
 pub mod release;
 pub mod run;
 pub mod secrets;

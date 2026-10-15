@@ -8,7 +8,7 @@ use std::{
 use anyhow::{Result, ensure};
 use regex::Regex;
 use shared::{
-    config, inspect,
+    config, inspect, local_network,
     run::{has, run},
     tvos,
 };
@@ -68,18 +68,15 @@ fn main() -> Result<()> {
         config.version
     ))?;
 
-    // An Apple TV lets an app announce itself on the local network only with
-    // these 2 keys, see docs/inspect.md in hilen. Only a build with the
-    // inspect server announces, a shipped app has none of this.
-    if inspect::has_server(&tvos::lib(tvos::SIMULATOR, &config.lib_name))? {
-        for command in [
-            "Add :NSLocalNetworkUsageDescription string The developer tools find this app on the local network.",
-            "Add :NSBonjourServices array",
-            "Add :NSBonjourServices:0 string _hilen-inspect._tcp",
-        ] {
-            run(&format!("/usr/libexec/PlistBuddy -c \"{command}\" {plist}"))?;
-        }
-    }
+    // An Apple TV lets an app announce itself or browse on the local network
+    // only for the types in these 2 keys, see docs/inspect.md in hilen. The
+    // inspect server announces only in a build that carries it, a shipped
+    // app has only the types of its [local_network] table.
+    local_network::write_plist(
+        &plist,
+        config.local_network.as_ref(),
+        inspect::has_server(&tvos::lib(tvos::SIMULATOR, &config.lib_name))?,
+    )?;
 
     std::env::set_current_dir("mobile/tvOS")?;
 

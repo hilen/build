@@ -10,7 +10,7 @@ use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
 use crate::{
-    config, links,
+    bluetooth, camera, config, links,
     run::{capture, run},
 };
 
@@ -36,6 +36,11 @@ pub struct Release {
     pub daemons:         Vec<Daemon>,
     /// the url scheme of the `[links]` table, registered by the packaging
     pub link_scheme:     Option<String>,
+    /// the text of the `[camera]` table, the packaging asks for the camera
+    pub camera_usage:    Option<String>,
+    /// the text of the `[bluetooth]` table, which macOS shows when it asks
+    /// for Bluetooth
+    pub bluetooth_usage: Option<String>,
 }
 
 /// A second product of an app, a binary with no window that updates itself
@@ -148,6 +153,8 @@ pub fn read() -> Result<Release> {
     let text = read_to_string("hilen.toml")?;
     let hilen: Hilen = toml::from_str(&text).context("[release] table in hilen.toml")?;
     let link_scheme = links::scheme_of(&text)?;
+    let camera_usage = camera::usage_of(&text)?;
+    let bluetooth_usage = bluetooth::usage_of(&text)?;
 
     let metadata: Metadata = serde_json::from_str(&capture("cargo metadata --no-deps --format-version 1")?)?;
     let release = hilen.release;
@@ -177,6 +184,8 @@ pub fn read() -> Result<Release> {
     Ok(Release {
         daemons,
         link_scheme,
+        camera_usage,
+        bluetooth_usage,
         download_url: release.download_url.map_or_else(
             || format!("{DOWNLOAD_HOST}/{name}"),
             |url| url.trim_end_matches('/').to_string(),

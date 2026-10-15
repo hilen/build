@@ -58,12 +58,23 @@ fn main() -> Result<()> {
     inspect::refuse(&universal)?;
 
     let app = bundle(&r, &universal)?;
+    // The hardened runtime keeps the camera closed to an app without the
+    // entitlement. The bare binary gets it too, the updater puts it into
+    // the bundle.
+    let entitlements = match &r.camera_usage {
+        Some(_) => {
+            let path = format!("target/release/bundle/{}.entitlements", r.name);
+            std::fs::write(&path, shared::camera::entitlements())?;
+            format!(r#" --entitlements "{path}""#)
+        }
+        None => String::new(),
+    };
     if let Some(identity) = &signing {
         run(&format!(
-            r#"codesign --force --deep --options runtime --timestamp --sign "{identity}" "{app}""#
+            r#"codesign --force --deep --options runtime --timestamp{entitlements} --sign "{identity}" "{app}""#
         ))?;
         run(&format!(
-            r#"codesign --force --options runtime --timestamp --sign "{identity}" "{universal}""#
+            r#"codesign --force --options runtime --timestamp{entitlements} --sign "{identity}" "{universal}""#
         ))?;
         notarize_app(&app)?;
     }
@@ -159,7 +170,7 @@ fn info_plist(r: &Release) -> String {
   <key>LSMinimumSystemVersion</key><string>11.0</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
   <key>NSHighResolutionCapable</key><true/>
-{links}</dict>
+{links}{camera}{bluetooth}</dict>
 </plist>
 "#,
         name = r.name,
@@ -169,6 +180,12 @@ fn info_plist(r: &Release) -> String {
             .link_scheme
             .as_deref()
             .map(|scheme| shared::links::plist_lines(scheme, &r.bundle_id))
+            .unwrap_or_default(),
+        camera = r.camera_usage.as_deref().map(shared::camera::plist_lines).unwrap_or_default(),
+        bluetooth = r
+            .bluetooth_usage
+            .as_deref()
+            .map(shared::bluetooth::plist_lines)
             .unwrap_or_default()
     )
 }

@@ -1,11 +1,14 @@
 #!/usr/bin/env rust
 
-use std::fs::{read_to_string, write};
+use std::{
+    fs::{read_to_string, write},
+    process::Command,
+};
 
 use anyhow::{Result, ensure};
 use regex::Regex;
 use shared::{
-    config, inspect, ios,
+    camera, config, inspect, ios, local_network,
     run::{has, run},
 };
 
@@ -67,20 +70,26 @@ fn main() -> Result<()> {
         config.version, config.project_name
     ))?;
 
-    // An iPhone lets an app announce itself on the local network only with
-    // these 2 keys, see docs/inspect.md in hilen. Only a build with the
-    // inspect server announces, a shipped app has none of this.
-    let lib = format!("target/universal/release/{}", config.lib_name);
-    if inspect::has_server(&lib)? {
+    // iOS stops an app that asks for the camera with no text to show. The
+    // text goes past the shell, it is the app's own words.
+    if let Some(usage) = camera::usage_of(&read_to_string("hilen.toml")?)? {
         let plist = format!("mobile/iOS/{}/Info.plist", config.project_name);
-        for command in [
-            "Add :NSLocalNetworkUsageDescription string The developer tools find this app on the local network.",
-            "Add :NSBonjourServices array",
-            "Add :NSBonjourServices:0 string _hilen-inspect._tcp",
-        ] {
-            run(&format!("/usr/libexec/PlistBuddy -c \"{command}\" {plist}"))?;
-        }
+        let add = format!("Add :{} string {usage}", camera::USAGE_KEY);
+        println!("PlistBuddy {add}");
+        let status = Command::new("/usr/libexec/PlistBuddy").args(["-c", &add, &plist]).status()?;
+        ensure!(status.success(), "the camera usage text did not go into {plist}");
     }
+
+    // An iPhone lets an app announce itself or browse on the local network
+    // only for the types in these 2 keys, see docs/inspect.md in hilen. The
+    // inspect server announces only in a build that carries it, a shipped
+    // app has only the types of its [local_network] table.
+    let lib = format!("target/universal/release/{}", config.lib_name);
+    local_network::write_plist(
+        &format!("mobile/iOS/{}/Info.plist", config.project_name),
+        config.local_network.as_ref(),
+        inspect::has_server(&lib)?,
+    )?;
 
     std::env::set_current_dir("mobile/iOS")?;
 
