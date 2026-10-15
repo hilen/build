@@ -9,6 +9,7 @@
 //! icon = "assets/icon.png"            # a square png, this path when left out
 //! features = "webgl"                  # cargo features of the build, this when left out
 //! default_features = true             # false leaves the default features out
+//! packaged = false                    # true packs the whole dist, url is then not used
 //! ```
 
 use std::{fs::read_to_string, path::Path};
@@ -32,6 +33,8 @@ pub struct Webos {
     pub icon: String,
     pub features: String,
     pub default_features: bool,
+    /// The .ipk holds the whole dist and loads nothing from a server to start.
+    pub packaged: bool,
 }
 
 #[derive(Deserialize, Default)]
@@ -47,6 +50,7 @@ struct Table {
     icon: Option<String>,
     features: Option<String>,
     default_features: Option<bool>,
+    packaged: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -93,6 +97,7 @@ pub fn read() -> Result<Webos> {
         icon: table.icon.unwrap_or_else(|| "assets/icon.png".to_string()),
         features: table.features.unwrap_or_else(|| "webgl".to_string()),
         default_features: table.default_features.unwrap_or(true),
+        packaged: table.packaged.unwrap_or(false),
         name: package.name,
         version: package.version,
         crate_dir,

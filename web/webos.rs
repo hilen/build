@@ -3,12 +3,13 @@
 // Builds an app for an LG webOS TV. The TV runs the app as a web page in a
 // Chromium that never updates, 79 on a 2021 set, so the wasm is built for
 // that browser and the start script trunk writes is rewritten for it. Then
-// the hosted app is packed: a small .ipk whose page sends the TV to the
-// address the app is served from. `--dist` stops after the dist.
+// the app is packed. A hosted app is a small .ipk whose page sends the TV to
+// the address the app is served from. A packaged app holds the whole dist
+// and starts from the TV. `--dist` stops after the dist.
 //
 //   rust ./build/web/webos.rs [--dist]
 
-use std::fs::{copy, create_dir_all, read_to_string, remove_dir_all, write};
+use std::fs::{copy, create_dir_all, read_to_string, remove_dir_all, remove_file, write};
 
 use anyhow::{Context, Result, bail, ensure};
 use regex::Regex;
@@ -23,6 +24,29 @@ use shared::{
 // JS border, so the build drops to the mvp cpu and turns these 4 back on.
 const TARGET_FLAGS: &str =
     "-Ctarget-cpu=mvp -Ctarget-feature=+mutable-globals,+sign-ext,+nontrapping-fptoint,+bulk-memory";
+
+/// Chromium 79 of webOS lists WEBGL_compressed_texture_astc, but its object
+/// has no getSupportedProfiles, which came later. wgpu calls it to choose the
+/// ASTC features and the throw stops the app. An extension without the call
+/// is LDR only. It runs before the app script, so it is the first in head.
+const ASTC_PROFILES: &str = r#"<script>
+(function () {
+    var getExtension = WebGL2RenderingContext.prototype.getExtension;
+    WebGL2RenderingContext.prototype.getExtension = function (name) {
+        var extension = getExtension.call(this, name);
+        if (name === "WEBGL_compressed_texture_astc" && extension && !extension.getSupportedProfiles) {
+            extension.getSupportedProfiles = function () {
+                return ["ldr"];
+            };
+        }
+        return extension;
+    };
+})();
+</script>"#;
+
+/// The page trunk builds a packaged app from, made next to index.html for
+/// the build and removed after it.
+const PACKAGED_PAGE: &str = "webos.index.html";
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -78,15 +102,48 @@ fn build_dist(webos: &Webos) -> Result<()> {
     } else {
         " --no-default-features"
     };
+    // A packaged app opens from a file:// address, where links that start at
+    // `/` point at the root of the TV file system.
+    let public_url = if webos.packaged { " --public-url ./" } else { "" };
+    let page = if webos.packaged {
+        packaged_page(webos)?
+    } else {
+        "index.html".to_string()
+    };
 
     // The standard library is rebuilt with the same flags. `--no-sri` leaves
     // the integrity attributes out, the start script is changed after the
-    // build and its hash would no longer hold.
-    run(&format!(
+    // build and its hash would no longer hold. `deploy-wasm` is the shipping
+    // profile with fat LTO. The TV compiles wasm with its slow optimizing
+    // compiler only, about 4.7 s a MB on an LG C1, so the TV build alone is
+    // built for size. Measured there in flixen: opt-level 3 started Rust
+    // after 37.4 s, "s" after 24.6 s, at the same frame times and CPU.
+    let built = run(&format!(
         "cd \"{}\" && RUSTFLAGS=\"{tokio}{TARGET_FLAGS}\" CARGO_UNSTABLE_BUILD_STD=std,panic_abort \
-         trunk build --release --no-sri --features {}{default_features}",
+         CARGO_PROFILE_DEPLOY_WASM_OPT_LEVEL=s \
+         trunk build {page} --release --cargo-profile deploy-wasm --no-sri{public_url} --features {}{default_features}",
         webos.crate_dir, webos.features
-    ))
+    ));
+    if webos.packaged {
+        remove_file(format!("{}/{PACKAGED_PAGE}", webos.crate_dir))?;
+    }
+    built
+}
+
+/// A packaged app opens from a file, where Chromium 79 loads no module
+/// script. Trunk builds it from a copy of index.html that asks wasm-bindgen
+/// for a classic script, which keeps the bindings in a global `wasm_bindgen`.
+fn packaged_page(webos: &Webos) -> Result<String> {
+    let page = read_to_string(format!("{}/index.html", webos.crate_dir))?;
+    let link = r#"data-trunk rel="rust""#;
+    ensure!(
+        page.matches(link).count() == 1,
+        "index.html of {} needs exactly 1 <link {link}>",
+        webos.crate_dir
+    );
+    let classic = page.replace(link, &format!(r#"{link} data-bindgen-target="no-modules""#));
+    write(format!("{}/{PACKAGED_PAGE}", webos.crate_dir), classic)?;
+    Ok(PACKAGED_PAGE.to_string())
 }
 
 /// The start script trunk writes uses a top level `await`, which came in
@@ -96,11 +153,20 @@ fn fix_start_script(webos: &Webos) -> Result<()> {
     let path = format!("{}/dist/index.html", webos.crate_dir);
     let page = read_to_string(&path).with_context(|| format!("no {path} after the build"))?;
 
-    let fixed = without_top_level_await(&page)?;
+    let fixed = if webos.packaged {
+        classic_start_script(webos, &page)?
+    } else {
+        without_top_level_await(&page)?
+    };
     ensure!(
         !fixed.contains("await init("),
         "the start script of {path} still has a top level await"
     );
+    ensure!(
+        fixed.matches("<head>").count() == 1,
+        "{path} needs exactly 1 <head> for the ASTC script"
+    );
+    let fixed = fixed.replace("<head>", &format!("<head>\n{ASTC_PROFILES}"));
 
     write(&path, fixed)?;
     println!("start script of {path} rewritten for Chromium 79");
@@ -118,14 +184,59 @@ fn without_top_level_await(page: &str) -> Result<String> {
         .into_owned())
 }
 
-fn pack(webos: &Webos) -> Result<()> {
-    let Some(url) = &webos.url else {
-        bail!("hilen.toml has no url in its [webos] table, the packaged app needs the address it loads");
+/// The page of a packaged app loads the classic script and reads the wasm
+/// by XHR. A file:// page on the TV can neither import a module nor fetch,
+/// and the preload links would fetch too.
+fn classic_start_script(webos: &Webos, page: &str) -> Result<String> {
+    let script = Regex::new(
+        r"(?s)<script type=.module.>\s*import init, \* as bindings from '\./([^']+\.js)';\s*const wasm = await init\(\{ module_or_path: '\./([^']+\.wasm)' \}\);.*?</script>",
+    )?;
+    let Some(found) = script.captures(page) else {
+        bail!("the page has no trunk start script that imports init and bindings, trunk changed its template");
     };
+    let js = found[1].to_string();
+    let wasm = found[2].to_string();
+
+    let code = read_to_string(format!("{}/dist/{js}", webos.crate_dir))?;
     ensure!(
-        !probe("command -v ares-package").trim().is_empty(),
-        "ares-package is not installed, run: npm install -g @webos-tools/cli"
+        !code.contains("import.meta") && !code.lines().any(|line| line.starts_with("export ")),
+        "{js} is still an ES module, the no-modules target of wasm-bindgen did not apply"
     );
+
+    let start = format!(
+        r#"<script src="./{js}"></script>
+<script>
+(function () {{
+    var request = new XMLHttpRequest();
+    request.open("GET", "./{wasm}");
+    request.responseType = "arraybuffer";
+    request.onloadend = function () {{
+        if (!request.response) {{
+            console.error("Failed to read ./{wasm}");
+            return;
+        }}
+        wasm_bindgen({{ module_or_path: request.response }}).then(function (wasm) {{
+            window.wasmBindings = wasm_bindgen;
+            dispatchEvent(new CustomEvent("TrunkApplicationStarted", {{ detail: {{ wasm: wasm }} }}));
+        }});
+    }};
+    request.send();
+}})();
+</script>"#
+    );
+    let preload = Regex::new(r#"<link rel="(modulepreload|preload)" [^>]*>\n?"#)?;
+    let page = script.replace(page, start.as_str()).into_owned();
+    Ok(preload.replace_all(&page, "").into_owned())
+}
+
+fn pack(webos: &Webos) -> Result<()> {
+    let url = match (&webos.url, webos.packaged) {
+        (_, true) => None,
+        (Some(url), false) => Some(url),
+        (None, false) => bail!(
+            "hilen.toml has no url in its [webos] table, the hosted app needs the address it loads"
+        ),
+    };
     ensure!(
         std::path::Path::new(&webos.icon).exists(),
         "no icon at {}, set icon in the [webos] table of hilen.toml",
@@ -154,15 +265,28 @@ fn pack(webos: &Webos) -> Result<()> {
         required_acg: Vec::new(),
     };
     write(format!("{dir}/appinfo.json"), serde_json::to_string_pretty(&info)?)?;
-    write(format!("{dir}/index.html"), launcher_page(&webos.title, url)?)?;
+    match url {
+        Some(url) => write(format!("{dir}/index.html"), launcher_page(&webos.title, url)?)?,
+        None => run(&format!("cp -R \"{}/dist/.\" \"{dir}/\"", webos.crate_dir))?,
+    }
 
+    // The folder is whole before this check, so a machine with the packer
+    // can pack the folder of a builder that has none.
+    ensure!(
+        !probe("command -v ares-package").trim().is_empty(),
+        "ares-package is not installed, run: npm install -g @webos-tools/cli. The folder to pack is {dir}"
+    );
     create_dir_all("dist")?;
-    // The page is 1 line of script, there is nothing to minify, and the
-    // minifier of the tool chokes on new JavaScript.
+    // The minifier of the tool chokes on new JavaScript, and trunk already
+    // minified the dist of a packaged app.
     run(&format!("ares-package --no-minify \"{dir}\" -o dist"))?;
 
+    let start = url.map_or_else(
+        || "it holds the whole app".to_string(),
+        |url| format!("it loads {url}"),
+    );
     println!(
-        "packed dist/{}_{}_all.ipk, it loads {url}. Install it with: ares-install dist/{}_{}_all.ipk",
+        "packed dist/{}_{}_all.ipk, {start}. Install it with: ares-install dist/{}_{}_all.ipk",
         webos.id, webos.version, webos.id, webos.version
     );
     Ok(())
