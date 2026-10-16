@@ -67,6 +67,15 @@ struct AppInfo {
     // also when it is empty.
     #[serde(rename = "requiredACG")]
     required_acg: Vec<String>,
+    // The V8 of an LG C1 compiles wasm with its slow optimizing compiler
+    // only, Liftoff is off. With it the 6 MB wasm of flixen started Rust
+    // after 10 s in place of 17.7 s. Lazy compilation and more compile tasks
+    // were measured too and gave nothing on top. The TV reads this key only
+    // at install, an edit of the installed file does nothing.
+    v8_extra_flags: String,
+    // The TV shows it from the launch until the first frame, the compile of
+    // the wasm is black otherwise.
+    splash_background: String,
 }
 
 fn main() -> Result<()> {
@@ -114,13 +123,14 @@ fn build_dist(webos: &Webos) -> Result<()> {
     // The standard library is rebuilt with the same flags. `--no-sri` leaves
     // the integrity attributes out, the start script is changed after the
     // build and its hash would no longer hold. `deploy-wasm` is the shipping
-    // profile with fat LTO. The TV compiles wasm with its slow optimizing
-    // compiler only, about 4.7 s a MB on an LG C1, so the TV build alone is
-    // built for size. Measured there in flixen: opt-level 3 started Rust
-    // after 37.4 s, "s" after 24.6 s, at the same frame times and CPU.
+    // profile with fat LTO. Without Liftoff the TV compiles wasm with its slow
+    // optimizing compiler only, about 4.7 s a MB on an LG C1, and with it the
+    // time still grows with the code, so the TV build alone is built for size. Measured there in flixen: opt-level 3 started Rust
+    // after 37.4 s, "s" after 24.6 s, "z" after 20.2 s, at the same frame
+    // times.
     let built = run(&format!(
         "cd \"{}\" && RUSTFLAGS=\"{tokio}{TARGET_FLAGS}\" CARGO_UNSTABLE_BUILD_STD=std,panic_abort \
-         CARGO_PROFILE_DEPLOY_WASM_OPT_LEVEL=s \
+         CARGO_PROFILE_DEPLOY_WASM_OPT_LEVEL=z \
          trunk build {page} --release --cargo-profile deploy-wasm --no-sri{public_url} --features {}{default_features}",
         webos.crate_dir, webos.features
     ));
@@ -251,6 +261,7 @@ fn pack(webos: &Webos) -> Result<()> {
 
     icon(&webos.icon, &format!("{dir}/icon.png"), 80)?;
     icon(&webos.icon, &format!("{dir}/largeIcon.png"), 130)?;
+    splash(&webos.icon, &format!("{dir}/splash.png"))?;
 
     let info = AppInfo {
         id: webos.id.clone(),
@@ -263,6 +274,8 @@ fn pack(webos: &Webos) -> Result<()> {
         large_icon: "largeIcon.png".to_string(),
         disable_back_history_api: true,
         required_acg: Vec::new(),
+        v8_extra_flags: "--liftoff".to_string(),
+        splash_background: "splash.png".to_string(),
     };
     write(format!("{dir}/appinfo.json"), serde_json::to_string_pretty(&info)?)?;
     match url {
@@ -322,4 +335,20 @@ fn icon(source: &str, target: &str, side: u32) -> Result<()> {
         return run(&format!("magick \"{source}\" -resize {side}x{side} \"{target}\""));
     }
     bail!("no sips and no magick to scale the icon, install ImageMagick")
+}
+
+/// The icon in the middle of a black screen of the TV, 1920 by 1080.
+fn splash(source: &str, target: &str) -> Result<()> {
+    if !probe("command -v sips").trim().is_empty() {
+        copy(source, target)?;
+        return run(&format!(
+            "sips -z 320 320 \"{target}\" >/dev/null && sips --padToHeightWidth 1080 1920 --padColor 000000 \"{target}\" >/dev/null"
+        ));
+    }
+    if !probe("command -v magick").trim().is_empty() {
+        return run(&format!(
+            "magick -size 1920x1080 xc:black \\( \"{source}\" -resize 320x320 \\) -gravity center -composite \"{target}\""
+        ));
+    }
+    bail!("no sips and no magick to make the splash, install ImageMagick")
 }
