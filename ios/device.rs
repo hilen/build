@@ -18,6 +18,10 @@ const USAGE: &str = r#"run the app of this folder on a paired iPhone, iPad or Ap
   make device                  build the app and swap the device to it
   make device args=status      the library the loader on the device runs
   make device args=install     build the loader, install it and start it, once per device
+  make device args=release     free the loader of the device for another session
+
+Only 1 agent session at a time sends apps to a device. Another session is
+refused until the holder stops or releases it, a person always gets it.
 
 A word in front picks the device by a part of its name or kind, like
 args=tv or args="ipad install". The next call with no word goes to the
@@ -26,7 +30,7 @@ same device."#;
 fn main() -> Result<()> {
     let mut args: Vec<String> = args().skip(1).collect();
     let command = match args.last().map(String::as_str) {
-        Some("install" | "status") => args.pop(),
+        Some("install" | "status" | "release") => args.pop(),
         _ => None,
     };
     if args.len() > 1 || args.first().is_some_and(|word| word.starts_with('-')) {

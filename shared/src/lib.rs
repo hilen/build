@@ -2,6 +2,7 @@ pub mod bluetooth;
 pub mod camera;
 pub mod config;
 pub mod device;
+pub mod device_lock;
 pub mod hot;
 pub mod inspect;
 pub mod ios;

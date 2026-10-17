@@ -16,6 +16,7 @@ use std::{
 use anyhow::{Context, Result, bail};
 
 use crate::{
+    device_lock,
     hot::System,
     run::{capture, probe, run},
     swap::{Swap, inspect_tool},
@@ -190,10 +191,21 @@ fn engine_repo(app: &Path) -> Result<PathBuf> {
 pub fn make_device(app: &Path, word: Option<&str>, command: Option<&str>) -> Result<()> {
     let engine = engine_repo(app)?;
     let kept = app.join(KEPT);
+    let named = word.is_some();
     let word = match word {
         Some(word) => Some(word.to_string()),
         None => read_to_string(&kept).ok().map(|id| id.trim().to_string()),
     };
+
+    // A release needs no device, the phone may be locked or away. The
+    // kept word is the id the lock was taken for, a named word goes
+    // through the lookup below.
+    if command == Some("release")
+        && !named
+        && let Some(id) = &word
+    {
+        return device_lock::release(id);
+    }
 
     // The loader is built from the engine repo, and so is the inspect tool.
     set_current_dir(&engine)?;
@@ -203,6 +215,13 @@ pub fn make_device(app: &Path, word: Option<&str>, command: Option<&str>) -> Res
         create_dir_all(dir)?;
     }
     write(&kept, &device.id)?;
+
+    if command == Some("release") {
+        return device_lock::release(&device.id);
+    }
+    if command != Some("status") {
+        device_lock::take(&device.id, &app.display().to_string())?;
+    }
 
     let swap = Swap::new(device.system)?;
     match command {
