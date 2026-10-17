@@ -61,10 +61,12 @@ struct App {
     root: PathBuf,
 }
 
-/// `Cargo.toml`, only what is read here.
+/// `Cargo.toml`, only what is read here. A workspace root has no package,
+/// its app is the first of its default members.
 #[derive(Deserialize)]
 struct Manifest {
-    package: Package,
+    package:   Option<Package>,
+    workspace: Option<Workspace>,
 }
 
 #[derive(Deserialize)]
@@ -72,20 +74,45 @@ struct Package {
     name: String,
 }
 
+#[derive(Deserialize)]
+struct Workspace {
+    #[serde(default, rename = "default-members")]
+    default_members: Vec<String>,
+}
+
+/// The name of the package of the crate in `folder`, or of the first
+/// default member of the workspace there.
+fn package_name(folder: &Path) -> Result<String> {
+    let path = folder.join("Cargo.toml");
+    let text = read_to_string(&path).with_context(|| format!("no {}", path.display()))?;
+    let manifest: Manifest = toml::from_str(&text).with_context(|| format!("{} did not parse", path.display()))?;
+    if let Some(package) = manifest.package {
+        return Ok(package.name);
+    }
+    let member = manifest
+        .workspace
+        .and_then(|workspace| workspace.default_members.into_iter().next())
+        .with_context(|| format!("{} names no package and no default member", path.display()))?;
+    let text = read_to_string(folder.join(&member).join("Cargo.toml"))
+        .with_context(|| format!("no Cargo.toml in the default member {member}"))?;
+    let manifest: Manifest = toml::from_str(&text)?;
+    manifest
+        .package
+        .map(|package| package.name)
+        .with_context(|| format!("the default member {member} names no package"))
+}
+
 impl App {
     /// The app whose crate is in `folder`.
     fn find(folder: &str) -> Result<Self> {
         let folder = Path::new(folder).canonicalize().with_context(|| format!("no folder {folder}"))?;
-        let manifest = folder.join("Cargo.toml");
-        let text = read_to_string(&manifest).with_context(|| format!("no {}", manifest.display()))?;
-        let manifest: Manifest =
-            toml::from_str(&text).with_context(|| format!("{} names no package", manifest.display()))?;
+        let name = package_name(&folder)?;
         let root = folder
             .ancestors()
             .find(|dir| dir.join(PROJECT_FILE).is_file())
             .with_context(|| format!("no {PROJECT_FILE} in {} or above it", folder.display()))?;
         Ok(Self {
-            name: manifest.package.name,
+            name,
             root: root.to_path_buf(),
         })
     }
@@ -352,6 +379,27 @@ mod tests {
         write(crate_dir.join("Cargo.toml"), "[package]\nname = \"the-game\"")?;
 
         let app = App::find(&crate_dir.display().to_string())?;
+        assert_eq!(app.name, "the-game");
+        assert_eq!(app.root, dir.canonicalize()?);
+
+        remove_dir_all(dir)?;
+        Ok(())
+    }
+
+    /// `make device` runs at the repo root, which can be a workspace with
+    /// the app crate in a folder of its own, like turnscan.
+    #[test]
+    fn a_workspace_root_names_the_app_by_its_default_member() -> Result<()> {
+        let dir = temp_dir().join(format!("hilen-swap-workspace-test-{}", id()));
+        create_dir_all(dir.join("app"))?;
+        write(dir.join(PROJECT_FILE), "project_name = \"game\"")?;
+        write(
+            dir.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"app\", \"crates/sim\"]\ndefault-members = [\"app\"]",
+        )?;
+        write(dir.join("app/Cargo.toml"), "[package]\nname = \"the-game\"")?;
+
+        let app = App::find(&dir.display().to_string())?;
         assert_eq!(app.name, "the-game");
         assert_eq!(app.root, dir.canonicalize()?);
 
