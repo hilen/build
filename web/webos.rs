@@ -76,6 +76,11 @@ struct AppInfo {
     // The TV shows it from the launch until the first frame, the compile of
     // the wasm is black otherwise.
     splash_background: String,
+    // The launcher tile is taller than the icon and fills the rest with
+    // black when this is missing, a square icon got black bars at the top
+    // and the bottom on an LG C1.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    icon_color: Option<String>,
 }
 
 fn main() -> Result<()> {
@@ -261,7 +266,8 @@ fn pack(webos: &Webos) -> Result<()> {
 
     icon(&webos.icon, &format!("{dir}/icon.png"), 80)?;
     icon(&webos.icon, &format!("{dir}/largeIcon.png"), 130)?;
-    splash(&webos.icon, &format!("{dir}/splash.png"))?;
+    let icon_color = icon_color(&webos.icon)?;
+    splash(&webos.icon, &format!("{dir}/splash.png"), icon_color.as_deref().unwrap_or("#ffffff"))?;
 
     let info = AppInfo {
         id: webos.id.clone(),
@@ -276,6 +282,7 @@ fn pack(webos: &Webos) -> Result<()> {
         required_acg: Vec::new(),
         v8_extra_flags: "--liftoff".to_string(),
         splash_background: "splash.png".to_string(),
+        icon_color,
     };
     write(format!("{dir}/appinfo.json"), serde_json::to_string_pretty(&info)?)?;
     match url {
@@ -337,17 +344,56 @@ fn icon(source: &str, target: &str, side: u32) -> Result<()> {
     bail!("no sips and no magick to scale the icon, install ImageMagick")
 }
 
-/// The icon in the middle of a black screen of the TV, 1920 by 1080.
-fn splash(source: &str, target: &str) -> Result<()> {
+/// The color of the top left pixel of the icon, the background of the tile
+/// around it. None when that pixel is transparent.
+fn icon_color(source: &str) -> Result<Option<String>> {
+    if !probe("command -v sips").trim().is_empty() {
+        let bmp = "target/webos/icon-color.bmp";
+        run(&format!("sips -s format bmp \"{source}\" --out {bmp} >/dev/null"))?;
+        let bytes = std::fs::read(bmp)?;
+        remove_file(bmp)?;
+        return Ok(bmp_top_left(&bytes)?.map(|[red, green, blue]| format!("#{red:02x}{green:02x}{blue:02x}")));
+    }
+    if !probe("command -v magick").trim().is_empty() {
+        let pixel = probe(&format!("magick \"{source}\" -format '%[hex:p{{0,0}}]' info:"));
+        let pixel = pixel.trim();
+        ensure!(pixel.len() >= 6, "magick gave no pixel for {source}: {pixel}");
+        let transparent = pixel.len() == 8 && pixel.ends_with("00");
+        return Ok((!transparent).then(|| format!("#{}", pixel[..6].to_lowercase())));
+    }
+    bail!("no sips and no magick to read the icon color, install ImageMagick")
+}
+
+/// The top left pixel of a 24 or 32 bit BMP as red, green and blue. A BMP
+/// keeps its rows from the bottom up unless its height is negative.
+fn bmp_top_left(bytes: &[u8]) -> Result<Option<[u8; 3]>> {
+    let u32_at = |at: usize| u32::from_le_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]]);
+    ensure!(bytes.len() > 54 && &bytes[..2] == b"BM", "not a BMP");
+    let data = u32_at(10) as usize;
+    let width = u32_at(18) as usize;
+    let height = u32_at(22) as i32;
+    let depth = u16::from_le_bytes([bytes[28], bytes[29]]) as usize;
+    ensure!(depth == 24 || depth == 32, "a BMP of {depth} bits");
+    let row = (width * depth / 8).div_ceil(4) * 4;
+    let top = if height < 0 { 0 } else { (height as usize - 1) * row };
+    let at = data + top;
+    let alpha = if depth == 32 { bytes[at + 3] } else { 255 };
+    Ok((alpha > 0).then(|| [bytes[at + 2], bytes[at + 1], bytes[at]]))
+}
+
+/// The icon in the middle of a screen of the TV, 1920 by 1080, filled with
+/// the background color of the icon so its edge does not show.
+fn splash(source: &str, target: &str, color: &str) -> Result<()> {
     if !probe("command -v sips").trim().is_empty() {
         copy(source, target)?;
+        let pad = color.trim_start_matches('#');
         return run(&format!(
-            "sips -z 320 320 \"{target}\" >/dev/null && sips --padToHeightWidth 1080 1920 --padColor 000000 \"{target}\" >/dev/null"
+            "sips -z 320 320 \"{target}\" >/dev/null && sips --padToHeightWidth 1080 1920 --padColor {pad} \"{target}\" >/dev/null"
         ));
     }
     if !probe("command -v magick").trim().is_empty() {
         return run(&format!(
-            "magick -size 1920x1080 xc:black \\( \"{source}\" -resize 320x320 \\) -gravity center -composite \"{target}\""
+            "magick -size 1920x1080 \"xc:{color}\" \\( \"{source}\" -resize 320x320 \\) -gravity center -composite \"{target}\""
         ));
     }
     bail!("no sips and no magick to make the splash, install ImageMagick")
