@@ -33,8 +33,9 @@ pub fn write_display_name(plist: &str, name: Option<&str>) -> Result<()> {
 /// app before main. Weak linking makes the missing constant NULL instead.
 ///
 /// The rest is what the engine needs linked and a static library cannot ask
-/// for by itself: the video decode of ffmpeg, zlib for it, and MediaPlayer
-/// for the lock screen controls. An app with no video links them for nothing,
-/// every iOS has them.
+/// for by itself: the video decode of ffmpeg, zlib for it, MediaPlayer for
+/// the lock screen controls, and LocalAuthentication for Touch ID and Face
+/// ID. An app with no video or no check links them for nothing, every iOS
+/// has them.
 pub const LDFLAGS: &str = "-Wl,-weak_framework,CoreGraphics -Wl,-weak_framework,Security \
--framework VideoToolbox -framework CoreMedia -framework CoreVideo -framework MediaPlayer -lz";
+-framework VideoToolbox -framework CoreMedia -framework CoreVideo -framework MediaPlayer -framework LocalAuthentication -lz";

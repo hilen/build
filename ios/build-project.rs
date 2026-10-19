@@ -8,7 +8,7 @@ use std::{
 use anyhow::{Result, ensure};
 use regex::Regex;
 use shared::{
-    camera, config, inspect, ios, local_network,
+    biometric, camera, config, inspect, ios, local_network,
     run::{has, run},
 };
 
@@ -74,14 +74,21 @@ fn main() -> Result<()> {
         config.display_name.as_deref(),
     )?;
 
-    // iOS stops an app that asks for the camera with no text to show. The
-    // text goes past the shell, it is the app's own words.
-    if let Some(usage) = camera::usage_of(&read_to_string("hilen.toml")?)? {
+    // iOS stops an app that asks for the camera with no text to show, and
+    // fails a Face ID check with none. The text goes past the shell, it is
+    // the app's own words.
+    let hilen_toml = read_to_string("hilen.toml")?;
+    let usages = [
+        (camera::USAGE_KEY, camera::usage_of(&hilen_toml)?),
+        (biometric::USAGE_KEY, biometric::usage_of(&hilen_toml)?),
+    ];
+    for (key, usage) in usages {
+        let Some(usage) = usage else { continue };
         let plist = format!("mobile/iOS/{}/Info.plist", config.project_name);
-        let add = format!("Add :{} string {usage}", camera::USAGE_KEY);
+        let add = format!("Add :{key} string {usage}");
         println!("PlistBuddy {add}");
         let status = Command::new("/usr/libexec/PlistBuddy").args(["-c", &add, &plist]).status()?;
-        ensure!(status.success(), "the camera usage text did not go into {plist}");
+        ensure!(status.success(), "the usage text {key} did not go into {plist}");
     }
 
     // An iPhone lets an app announce itself or browse on the local network

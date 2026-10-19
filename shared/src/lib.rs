@@ -1,3 +1,4 @@
+pub mod biometric;
 pub mod bluetooth;
 pub mod camera;
 pub mod config;
