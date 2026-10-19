@@ -5,18 +5,22 @@ use std::process::Command;
 
 use anyhow::{Result, ensure};
 
-/// Writes `CFBundleDisplayName` into a generated Info.plist. The template has
-/// no such key, so it is added, or set when an earlier run added it. The name
-/// goes past the shell, it may hold spaces.
+/// Writes the name into `CFBundleDisplayName` and `CFBundleName` of a
+/// generated Info.plist. Apple checks both against the names of its own apps,
+/// so a bundle name left at the project name still fails with 90129. The
+/// template has no display name key, so it is added, or set when an earlier
+/// run added it. The name goes past the shell, it may hold spaces.
 pub fn write_display_name(plist: &str, name: Option<&str>) -> Result<()> {
     let Some(name) = name else { return Ok(()) };
     let buddy = |command: String| Command::new("/usr/libexec/PlistBuddy").args(["-c", &command, plist]).output();
-    let set = buddy(format!("Set :CFBundleDisplayName {name}"))?;
-    if !set.status.success() {
-        let add = buddy(format!("Add :CFBundleDisplayName string {name}"))?;
-        ensure!(add.status.success(), "the display name did not go into {plist}");
+    for key in ["CFBundleDisplayName", "CFBundleName"] {
+        let set = buddy(format!("Set :{key} {name}"))?;
+        if !set.status.success() {
+            let add = buddy(format!("Add :{key} string {name}"))?;
+            ensure!(add.status.success(), "{key} did not go into {plist}");
+        }
+        println!("{key} {name}");
     }
-    println!("CFBundleDisplayName {name}");
     Ok(())
 }
 
