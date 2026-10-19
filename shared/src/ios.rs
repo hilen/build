@@ -1,4 +1,24 @@
-//! What every xcodebuild of an iOS app passes.
+//! What every xcodebuild of an iOS app passes, and the name an Apple app
+//! shows under its icon.
+
+use std::process::Command;
+
+use anyhow::{Result, ensure};
+
+/// Writes `CFBundleDisplayName` into a generated Info.plist. The template has
+/// no such key, so it is added, or set when an earlier run added it. The name
+/// goes past the shell, it may hold spaces.
+pub fn write_display_name(plist: &str, name: Option<&str>) -> Result<()> {
+    let Some(name) = name else { return Ok(()) };
+    let buddy = |command: String| Command::new("/usr/libexec/PlistBuddy").args(["-c", &command, plist]).output();
+    let set = buddy(format!("Set :CFBundleDisplayName {name}"))?;
+    if !set.status.success() {
+        let add = buddy(format!("Add :CFBundleDisplayName string {name}"))?;
+        ensure!(add.status.success(), "the display name did not go into {plist}");
+    }
+    println!("CFBundleDisplayName {name}");
+    Ok(())
+}
 
 /// The linker flags of the app. A setting on the command line replaces the
 /// one of the project, so every xcodebuild call passes all of them.

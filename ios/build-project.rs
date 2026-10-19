@@ -69,6 +69,10 @@ fn main() -> Result<()> {
         "/usr/libexec/PlistBuddy -c \"Set :CFBundleShortVersionString {}\" mobile/iOS/{}/Info.plist",
         config.version, config.project_name
     ))?;
+    ios::write_display_name(
+        &format!("mobile/iOS/{}/Info.plist", config.project_name),
+        config.display_name.as_deref(),
+    )?;
 
     // iOS stops an app that asks for the camera with no text to show. The
     // text goes past the shell, it is the app's own words.

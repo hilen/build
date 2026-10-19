@@ -8,7 +8,7 @@ use std::{
 use anyhow::{Result, ensure};
 use regex::Regex;
 use shared::{
-    config, inspect, local_network,
+    config, inspect, ios, local_network,
     run::{has, run},
     tvos,
 };
@@ -67,6 +67,7 @@ fn main() -> Result<()> {
         "/usr/libexec/PlistBuddy -c \"Set :CFBundleShortVersionString {}\" {plist}",
         config.version
     ))?;
+    ios::write_display_name(&plist, config.display_name.as_deref())?;
 
     // An Apple TV lets an app announce itself or browse on the local network
     // only for the types in these 2 keys, see docs/inspect.md in hilen. The

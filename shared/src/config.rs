@@ -28,6 +28,10 @@ pub struct Config {
     /// The app also ships for an Apple TV, `tvos = true` in hilen.toml.
     /// `make fly` then uploads a tvOS build too.
     pub tvos:                 bool,
+    /// The name under the icon on a phone or a TV, `display_name` in
+    /// hilen.toml. Without it the system shows `project_name`. Apple refuses
+    /// an upload whose name is taken by an app of its own, like Wallet.
+    pub display_name:         Option<String>,
     /// The Infisical project of the app, `infisical_project` in hilen.toml.
     /// A phone build reads its HILEN_SESSION_KEY from there.
     pub infisical_project:    Option<String>,
@@ -69,6 +73,11 @@ pub fn read() -> Result<Config> {
         ios_minimum_version:  ios_minimum_version.to_string(),
         tvos_minimum_version: tvos_minimum_version.to_string(),
         tvos:                 value.get("tvos").and_then(serde_json::Value::as_bool).unwrap_or(false),
+        display_name:         value
+            .get("display_name")
+            .and_then(serde_json::Value::as_str)
+            .filter(|name| !name.is_empty())
+            .map(str::to_owned),
         infisical_project:    value
             .get("infisical_project")
             .and_then(serde_json::Value::as_str)
