@@ -26,7 +26,7 @@ fn main() -> Result<()> {
 
     let export_options = "export.plist";
     let archive_path = format!("build/{}.xcarchive", config.project_name);
-    let ipa_path = format!("build/{}.ipa", config.project_name);
+    let ipa_path = format!("build/{}.ipa", config.bundle_name());
 
     std::env::set_current_dir("mobile/iOS")?;
 

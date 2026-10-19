@@ -40,6 +40,14 @@ pub struct Config {
     pub local_network:        Option<LocalNetwork>,
 }
 
+impl Config {
+    /// The `CFBundleName` of an Apple build. Xcode names the exported ipa
+    /// after it, so the upload looks for this name.
+    pub fn bundle_name(&self) -> &str {
+        self.display_name.as_deref().unwrap_or(&self.project_name)
+    }
+}
+
 /// Read from the repo root. Several scripts chdir into mobile/iOS partway
 /// through, so read this before that happens, not lazily after.
 pub fn read() -> Result<Config> {
