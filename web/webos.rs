@@ -5,9 +5,11 @@
 // that browser and the start script trunk writes is rewritten for it. Then
 // the app is packed. A hosted app is a small .ipk whose page sends the TV to
 // the address the app is served from. A packaged app holds the whole dist
-// and starts from the TV. `--dist` stops after the dist.
+// and starts from the TV. `--dist` stops after the dist. `--dev` builds a
+// dev package with the inspector of hilen, see "An installed TV app" in
+// docs/inspect.md of hilen. It must never ship.
 //
-//   rust ./build/web/webos.rs [--dist]
+//   rust ./build/web/webos.rs [--dist] [--dev]
 
 use std::fs::{copy, create_dir_all, read_to_string, remove_dir_all, remove_file, write};
 
@@ -24,6 +26,19 @@ use shared::{
 // JS border, so the build drops to the mvp cpu and turns these 4 back on.
 const TARGET_FLAGS: &str =
     "-Ctarget-cpu=mvp -Ctarget-feature=+mutable-globals,+sign-ext,+nontrapping-fptoint,+bulk-memory";
+
+/// The inspector answers on a worker thread, which needs shared memory. The
+/// flags of `drive.ts`, rustc adds none of them itself. The LG C1 has
+/// `SharedArrayBuffer` with no isolation headers.
+const THREAD_FLAGS: &str = "-Ctarget-feature=+atomics -Clink-arg=--shared-memory -Clink-arg=--import-memory \
+     -Clink-arg=--max-memory=2147483648 -Clink-arg=--export=__wasm_init_tls -Clink-arg=--export=__tls_size \
+     -Clink-arg=--export=__tls_align -Clink-arg=--export=__tls_base -Clink-arg=--export=__heap_base \
+     -Clink-arg=--export=__data_end";
+
+/// What a dev package dials at its start. `hilen-inspect web-bridge
+/// --tunnel` carries this port of the TV to the Mac, the TV cannot open a
+/// connection to the Mac itself. The same port as `PAGE_PORT` of hilen.
+const INSPECT_URL: &str = "ws://127.0.0.1:7436/hilen-inspect";
 
 /// Chromium 79 of webOS lists WEBGL_compressed_texture_astc, but its object
 /// has no getSupportedProfiles, which came later. wgpu calls it to choose the
@@ -86,8 +101,13 @@ struct AppInfo {
 fn main() -> Result<()> {
     let webos = webos::read()?;
     let dist_only = std::env::args().any(|arg| arg == "--dist");
+    let dev = std::env::args().any(|arg| arg == "--dev");
+    ensure!(
+        !(dev && std::env::var_os("HILEN_RELEASE").is_some()),
+        "a dev package carries the inspector and never ships, HILEN_RELEASE is set"
+    );
 
-    build_dist(&webos)?;
+    build_dist(&webos, dev)?;
     fix_start_script(&webos)?;
 
     if dist_only {
@@ -98,7 +118,7 @@ fn main() -> Result<()> {
     pack(&webos)
 }
 
-fn build_dist(webos: &Webos) -> Result<()> {
+fn build_dist(webos: &Webos, dev: bool) -> Result<()> {
     run("rustup target add wasm32-unknown-unknown")?;
     run("rustup component add rust-src")?;
     run("command -v trunk >/dev/null || cargo install --locked trunk")?;
@@ -133,10 +153,16 @@ fn build_dist(webos: &Webos) -> Result<()> {
     // time still grows with the code, so the TV build alone is built for size. Measured there in flixen: opt-level 3 started Rust
     // after 37.4 s, "s" after 24.6 s, "z" after 20.2 s, at the same frame
     // times.
+    let (threads, inspect_url, inspect) = if dev {
+        println!("a dev package: the inspector dials {INSPECT_URL}");
+        (format!(" {THREAD_FLAGS}"), format!("HILEN_INSPECT_URL={INSPECT_URL} "), ",hilen/inspect")
+    } else {
+        (String::new(), String::new(), "")
+    };
     let built = run(&format!(
-        "cd \"{}\" && RUSTFLAGS=\"{tokio}{TARGET_FLAGS}\" CARGO_UNSTABLE_BUILD_STD=std,panic_abort \
-         CARGO_PROFILE_DEPLOY_WASM_OPT_LEVEL=z \
-         trunk build {page} --release --cargo-profile deploy-wasm --no-sri{public_url} --features {}{default_features}",
+        "cd \"{}\" && RUSTFLAGS=\"{tokio}{TARGET_FLAGS}{threads}\" CARGO_UNSTABLE_BUILD_STD=std,panic_abort \
+         CARGO_PROFILE_DEPLOY_WASM_OPT_LEVEL=z {inspect_url}\
+         trunk build {page} --release --cargo-profile deploy-wasm --no-sri{public_url} --features {}{inspect}{default_features}",
         webos.crate_dir, webos.features
     ));
     if webos.packaged {

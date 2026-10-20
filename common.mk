@@ -45,6 +45,11 @@ android-emu:
 webos:
 	rust ./build/web/webos.rs
 
+# The same package with the inspector of hilen, for `hilen-inspect
+# web-bridge`. Never ships.
+webos-dev:
+	rust ./build/web/webos.rs --dev
+
 webos-dist:
 	rust ./build/web/webos.rs --dist
 
