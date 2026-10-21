@@ -5,7 +5,9 @@
 //
 //   bun build/web/drive.ts [--browser firefox|chrome|none] [--only "Name,Name"]
 //                          [--port 44810] [--timeout 900] [--stall 180] [--no-build]
-//                          [--human] [--present --only "Name"]
+//                          [--human] [--present --only "Name"] [--webgl]
+//
+// --webgl draws on WebGL also where the browser has WebGPU, like a TV.
 
 import { parseArgs } from "node:util";
 import { existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync, writeSync } from "node:fs";
@@ -22,6 +24,7 @@ const { values: args } = parseArgs({
         "no-build": { type: "boolean", default: false },
         human: { type: "boolean", default: false },
         present: { type: "boolean", default: false },
+        webgl: { type: "boolean", default: false },
     },
 });
 
@@ -54,7 +57,7 @@ const RUSTFLAGS = [
 
 if (!args["no-build"]) {
     console.log("building atomics wasm with trunk");
-    const build = Bun.spawnSync(["trunk", "build"], {
+    const build = Bun.spawnSync(["trunk", "build", ...(args.webgl ? ["--features", "webgl"] : [])], {
         cwd: appDir,
         env: {
             ...process.env,
@@ -270,6 +273,9 @@ function testUrl(): string {
     let query = args.present ? "?hilen_present=1&hilen_inspect=1" : "?hilen_run_tests=1&hilen_inspect=1";
     if (args.human) {
         query += "&hilen_human=1";
+    }
+    if (args.webgl) {
+        query += "&hilen_webgl=1";
     }
     // Encode names one by one. Encoding the whole list turns the commas
     // into %2C, and the app splits the raw query on plain commas.
