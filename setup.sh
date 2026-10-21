@@ -1,7 +1,7 @@
 #!/bin/sh
 # Install the system build dependencies and Rust for a Linux or WSL build.
-# This is plain sh, not a RustScript build script, because it runs before
-# cargo and the rust interpreter exist on a fresh machine.
+# This is plain sh, not a Python build script, because it runs before cargo
+# and uv exist on a fresh machine.
 # It is idempotent: it probes for what is already there and installs only the
 # rest, so a repeat run does not ask for the sudo password.
 set -eu

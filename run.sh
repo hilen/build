@@ -1,6 +1,6 @@
 #!/bin/sh
 # Build and run the release binary. Plain sh so it works on a fresh WSL before
-# the rust interpreter exists.
+# uv exists.
 #
 # The Sentry DSN comes from Infisical so the bug report button works like a
 # shipped build. The app's Makefile passes its project as INFISICAL_PROJECT.

@@ -16,7 +16,7 @@ set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 # release::read prints the cargo command it runs first, the name is the last line.
-grant="$(rust "$here/grant.rs" | tail -n 1)"
+grant="$(uv run -q --no-dev "$here/grant.py" | tail -n 1)"
 url="${UPLOAD_DOOR:-https://beekeeper.tailf87cbe.ts.net}/upload/$grant"
 
 # The token reaches curl in a config on stdin, so it never shows in a

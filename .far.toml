@@ -1,0 +1,2 @@
+# Built per machine, so they must not travel.
+skip = [".venv", "__pycache__", ".pytest_cache", ".ruff_cache"]

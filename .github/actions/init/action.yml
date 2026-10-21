@@ -1,6 +1,6 @@
 name: init
 description: >
-  Installs rustscript and checks out the build submodule. The submodule url in
+  Installs uv and checks out the build submodule. The submodule url in
   .gitmodules is ssh, and an ssh fetch needs a GitHub key that a runner does
   not have. hilen/build is public, so the url is rewritten to https for this
   one command and the fetch needs no token.
@@ -8,7 +8,7 @@ description: >
 runs:
   using: composite
   steps:
-    - uses: VladasZ/rustscript@v0.1
+    - uses: astral-sh/setup-uv@v10
     - shell: bash
       run: |
         # The NixOS runners keep cargo and the other tools in these folders, and a

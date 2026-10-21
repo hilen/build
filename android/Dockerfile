@@ -1,9 +1,9 @@
 # Builds hilen Android APKs without any host Android tooling.
 # Everything here is a pinned build-time dependency: JDK, Android SDK
-# pieces, NDK, python for rust-android-gradle, the rustscript interpreter
-# for the build scripts, rustup with no toolchain. The Rust toolchain,
-# cargo registry and gradle caches live in named volumes mounted by
-# in_docker_android.rs, so bumping rust-toolchain.toml never invalidates
+# pieces, NDK, python for rust-android-gradle, uv for the build scripts,
+# rustup with no toolchain. The Rust toolchain, cargo registry and gradle
+# caches live in named volumes mounted by in_docker_android.py, so bumping
+# rust-toolchain.toml never invalidates
 # this image.
 #
 # Google ships the NDK and build-tools for linux x86_64 only, so this
@@ -47,14 +47,9 @@ RUN mkdir -p $ANDROID_HOME/cmdline-tools \
 RUN yes | sdkmanager --licenses > /dev/null \
     && sdkmanager "platforms;android-34" "build-tools;34.0.0" "ndk;$NDK_VERSION"
 
-# The build scripts are rustscript. The linux builds are static musl, so this
-# needs no toolchain of its own. Keep the version in step with in_docker.rs.
-ARG RUSTSCRIPT_VERSION=v0.1.4
-RUN curl -fsSL \
-    "https://github.com/VladasZ/rustscript/releases/download/${RUSTSCRIPT_VERSION}/rust-${RUSTSCRIPT_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
-    -o /tmp/rustscript.tar.gz \
-    && tar xzf /tmp/rustscript.tar.gz -C /usr/local/bin \
-    && rm /tmp/rustscript.tar.gz
+# The Python build scripts run through uv, which brings its own Python 3.14.
+# Keep the version in step with in_docker.py.
+COPY --from=ghcr.io/astral-sh/uv:0.13.1 /uv /uvx /usr/local/bin/
 
 RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain none --profile minimal --no-modify-path
 

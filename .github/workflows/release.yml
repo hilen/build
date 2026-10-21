@@ -1,7 +1,7 @@
 name: release
 
 # The desktop release of a hilen app, called from the app's own release.yml
-# on a `v*` tag. One platform per runner. Every build step is a rustscript
+# on a `v*` tag. One platform per runner. Every build step is a Python script
 # under build/release/ of the app's build submodule, this file only wires the
 # runners, the secrets and the upload together. Where the files go comes from
 # the [release] table of the app's hilen.toml. Every upload goes through the
@@ -63,7 +63,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: hilen/build/.github/actions/init@main
       - shell: bash
-        run: bash build/release/with-secrets.sh $APP_PROJECT_ID -- bash build/release/vm.sh rust build/release/linux.rs --arch=${{ matrix.arch }}
+        run: bash build/release/with-secrets.sh $APP_PROJECT_ID -- bash build/release/vm.sh uv run -q --no-dev build/release/linux.py --arch=${{ matrix.arch }}
       - uses: ./build/.github/actions/upload
         with:
           infisical_project: ${{ inputs.infisical_project }}
@@ -84,7 +84,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: hilen/build/.github/actions/init@main
       - shell: bash
-        run: bash build/release/with-secrets.sh $APP_PROJECT_ID -- rust build/release/win.rs --arch=${{ matrix.arch }}
+        run: bash build/release/with-secrets.sh $APP_PROJECT_ID -- uv run -q --no-dev build/release/win.py --arch=${{ matrix.arch }}
       - uses: ./build/.github/actions/upload
         with:
           infisical_project: ${{ inputs.infisical_project }}
@@ -107,11 +107,11 @@ jobs:
           door="bash build/release/with-secrets.sh $APP_PROJECT_ID -- bash build/release/door.sh"
           mkdir -p dist
           $door list > dist/present.txt
-          # No meta file at all is fine here, manifest.rs says what is missing.
+          # No meta file at all is fine here, manifest.py says what is missing.
           for meta in $(grep '\.meta\.json$' dist/present.txt || true); do
             $door get "$meta" dist
           done
-          rust build/release/manifest.rs --present dist/present.txt
+          uv run -q --no-dev build/release/manifest.py --present dist/present.txt
           $door put dist/manifest.json
           # The app manifest and one per daemon, each only when a lane built something.
           for f in dist/updater.json dist/*-updater.json; do

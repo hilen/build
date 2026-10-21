@@ -1,57 +1,57 @@
 
 ios:
-	rust ./build/ios/build-project.rs
+	uv run -q --no-dev ./build/ios/build-project.py
 
 ios-lib:
-	rust ./build/ios/build-lib.rs
+	uv run -q --no-dev ./build/ios/build-lib.py
 
 # An Apple TV. `tvos` builds the libs for the device and the simulator, makes
 # the Xcode project and builds it for the simulator. See hilen docs/tvos.md.
 tvos:
-	rust ./build/tvos/build-project.rs
+	uv run -q --no-dev ./build/tvos/build-project.py
 
 tvos-lib:
-	rust ./build/tvos/build-lib.rs
+	uv run -q --no-dev ./build/tvos/build-lib.py
 
 # Hot reload in the iOS simulator of this Mac: a saved file shows in the
 # running app with no install and no restart. `make hot args="tv"` does it in
 # the Apple TV simulator. See hilen docs/hot-reload.md.
 hot:
-	rust ./build/ios/hot.rs $(args)
+	uv run -q --no-dev ./build/ios/hot.py $(args)
 
 # The app of this folder on a paired iPhone, iPad or Apple TV, as a hot build
 # with no install: `make device`. args=tv picks the device by a part of its
 # name or kind, args=install puts the loader on it once, args=status asks it.
 # See hilen docs/hot-reload.md.
 device:
-	rust ./build/ios/device.rs $(args)
+	uv run -q --no-dev ./build/ios/device.py $(args)
 
 # 1 loader in the iOS simulator that swaps between several apps, on a command:
 # make swap args="start demo ../apps/skaityk", then args="to skaityk",
 # args="status" and args="stop". With `tv` as the first word it is the Apple
 # TV simulator, args="tv start demo ../apps/flixen". See hilen docs/hot-reload.md.
 swap:
-	rust ./build/ios/swap.rs $(args)
+	uv run -q --no-dev ./build/ios/swap.py $(args)
 
 android:
-	rust ./build/build.rs android
+	uv run -q --no-dev ./build/build.py android
 
 android-emu:
-	HILEN_ANDROID_ABI=arm64 rust ./build/build.rs android
+	HILEN_ANDROID_ABI=arm64 uv run -q --no-dev ./build/build.py android
 
 # An LG webOS TV. `webos-dist` builds the wasm dist an old TV browser can
 # load, `webos` also packs the hosted app, an .ipk that loads the dist from
 # the `url` of the [webos] table of hilen.toml. See hilen docs/webos.md.
 webos:
-	rust ./build/web/webos.rs
+	uv run -q --no-dev ./build/web/webos.py
 
 # The same package with the inspector of hilen, for `hilen-inspect
 # web-bridge`. Never ships.
 webos-dev:
-	rust ./build/web/webos.rs --dev
+	uv run -q --no-dev ./build/web/webos.py --dev
 
 webos-dist:
-	rust ./build/web/webos.rs --dist
+	uv run -q --no-dev ./build/web/webos.py --dist
 
 test:
 	cargo test --all
@@ -62,10 +62,10 @@ test:
 # Uploads the iOS build to TestFlight, and the tvOS build after it when
 # hilen.toml has `tvos = true`.
 fly:
-	rust ./build/ios/flight.rs
+	uv run -q --no-dev ./build/ios/flight.py
 
 profile:
-	rust ./build/scripts/profile.rs
+	uv run -q --no-dev ./build/scripts/profile.py
 
 pr:
 	gh pr create --fill
@@ -88,19 +88,19 @@ setup:
 # from the tag with the release-* targets, one platform per runner. Every
 # script reads Cargo.toml and the [release] table of hilen.toml.
 patch:
-	rust ./build/release/tag.rs patch
+	uv run -q --no-dev ./build/release/tag.py patch
 
 minor:
-	rust ./build/release/tag.rs minor
+	uv run -q --no-dev ./build/release/tag.py minor
 
 release-mac:
-	rust ./build/release/mac.rs
+	uv run -q --no-dev ./build/release/mac.py
 
 release-win:
-	rust ./build/release/win.rs
+	uv run -q --no-dev ./build/release/win.py
 
 release-linux:
-	rust ./build/release/linux.rs
+	uv run -q --no-dev ./build/release/linux.py
 
 manifest:
-	rust ./build/release/manifest.rs
+	uv run -q --no-dev ./build/release/manifest.py
