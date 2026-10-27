@@ -12,6 +12,7 @@
 
 import os
 import shutil
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
@@ -24,6 +25,11 @@ if TYPE_CHECKING:
     from shared.release import Release
 
 _NOTARIZE_LIMIT_SECS: Final = 900
+# Right after notarytool says Accepted, the ticket server of Apple sometimes
+# drops the lookup of stapler, Error 68, as it did at blackforge v0.2.15 and
+# v0.2.18. A try a little later gets the ticket.
+_STAPLE_TRIES: Final = 5
+_STAPLE_WAIT_SECS: Final = 15
 _KEYCHAIN: Final = "~/Library/Keychains/ci-signing.keychain-db"
 _KIB: Final = 1024
 
@@ -100,7 +106,20 @@ def _notarize(file: str):
     except ScriptError as err:
         bail(f"notarizing {file} failed or took over {_NOTARIZE_LIMIT_SECS} seconds: {err}")
     if file.endswith(".dmg"):
-        run(f'xcrun stapler staple "{file}"')
+        _staple(file)
+
+
+def _staple(file: str):
+    command = f'xcrun stapler staple "{file}"'
+    for attempt in range(1, _STAPLE_TRIES):
+        try:
+            run(command)
+        except ScriptError as err:
+            print(f"try {attempt} of {_STAPLE_TRIES} failed: {err}", flush=True)
+            time.sleep(_STAPLE_WAIT_SECS)
+        else:
+            return
+    run(command)
 
 
 # The app is notarized on its own before it goes into the dmg, so the bundle
@@ -109,7 +128,7 @@ def _notarize_app(app: str):
     zip_path = f"{app}.zip"
     run(f'ditto -c -k --keepParent "{app}" "{zip_path}"')
     _notarize(zip_path)
-    run(f'xcrun stapler staple "{app}"')
+    _staple(app)
     Path(zip_path).unlink()
 
 
