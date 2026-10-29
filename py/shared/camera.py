@@ -4,6 +4,7 @@
 # app never asks, see `camera` in hilen. The table holds 1 line, like
 # `usage = "Takes photos of the object on the turntable."`.
 
+from collections.abc import Sequence
 from typing import Final
 
 import msgspec
@@ -44,13 +45,13 @@ def plist_lines(usage: str) -> str:
     return f"  <key>{USAGE_KEY}</key><string>{escape(usage)}</string>\n"
 
 
-# The entitlements file of a Mac app that uses the camera.
-def entitlements() -> str:
+# The entitlements file of a Mac app, each key turned on.
+def entitlements(keys: Sequence[str]) -> str:
+    lines = "".join(f"  <key>{key}</key><true/>\n" for key in keys)
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>{ENTITLEMENT}</key><true/>
-</dict>
+{lines}</dict>
 </plist>
 """

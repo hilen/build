@@ -6,7 +6,7 @@ from shared.local_network import INSPECT_SERVICE, LocalNetwork, plist_keys
 from shared.secrets import SESSION_KEY_ENV, far_job, masked
 from shared.util import ScriptError
 
-from shared import biometric, bluetooth, camera, links
+from shared import biometric, bluetooth, camera, links, speech
 
 _APP = 'project_name = "turnscan"\nbundle_id = "vladas.turnscan"\n'
 
@@ -141,6 +141,25 @@ def test_camera():
     assert camera.usage_of('project_name = "scan"\n') is None
     with pytest.raises(ScriptError):
         camera.usage_of('[camera]\nusage = "  "\n')
+
+
+def test_speech():
+    toml = 'project_name = "banda"\n[speech]\nusage = "Your words <become> a prompt & more"\n'
+    usage = speech.usage_of(toml)
+    assert usage == "Your words <become> a prompt & more"
+    assert speech.plist_lines(usage) == (
+        "  <key>NSMicrophoneUsageDescription</key>"
+        "<string>Your words &lt;become&gt; a prompt &amp; more</string>\n"
+    )
+    assert speech.usage_of('project_name = "banda"\n') is None
+    with pytest.raises(ScriptError):
+        speech.usage_of('[speech]\nusage = "  "\n')
+
+
+def test_entitlements_hold_every_key():
+    text = camera.entitlements((camera.ENTITLEMENT, speech.ENTITLEMENT))
+    assert "  <key>com.apple.security.device.camera</key><true/>\n" in text
+    assert "  <key>com.apple.security.device.audio-input</key><true/>\n" in text
 
 
 def test_the_job_line_never_holds_the_key():

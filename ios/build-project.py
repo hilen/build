@@ -10,7 +10,7 @@ import sys
 from shared.run import has, run
 from shared.util import bail, run_main
 
-from shared import biometric, camera, config, inspect, ios, local_network, mobile, toml
+from shared import biometric, camera, config, inspect, ios, local_network, mobile, speech, toml
 
 
 def main() -> int:
@@ -36,6 +36,7 @@ def main() -> int:
     for key, usage in (
         (camera.USAGE_KEY, camera.usage_of(text)),
         (biometric.USAGE_KEY, biometric.usage_of(text)),
+        (speech.USAGE_KEY, speech.usage_of(text)),
     ):
         if usage is None:
             continue

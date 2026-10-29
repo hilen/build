@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Final
 
 import msgspec
 
-from shared import bluetooth, camera, cargo, config, links, toml
+from shared import bluetooth, camera, cargo, config, links, speech, toml
 from shared.run import run
 from shared.util import ScriptError, bail
 
@@ -68,6 +68,8 @@ class Release:
     camera_usage: str | None
     # the text of the `[bluetooth]` table, macOS shows it when it asks for it
     bluetooth_usage: str | None
+    # the text of the `[speech]` table, the packaging asks for the microphone
+    speech_usage: str | None
 
     # `kukareker-0.2.0-mac-universal.dmg` style names.
     def artifact(self, suffix: str) -> str:
@@ -162,4 +164,5 @@ def read() -> Release:
         link_scheme=links.scheme_of(text),
         camera_usage=camera.usage_of(text),
         bluetooth_usage=bluetooth.usage_of(text),
+        speech_usage=speech.usage_of(text),
     )

@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Final
 from shared.run import capture, run, run_secret
 from shared.util import ScriptError, bail, run_main
 
-from shared import bluetooth, camera, inspect, links, release
+from shared import bluetooth, camera, inspect, links, release, speech
 
 if TYPE_CHECKING:
     from shared.release import Release
@@ -52,6 +52,7 @@ def _info_plist(r: Release) -> str:
         ("" if r.link_scheme is None else links.plist_lines(r.link_scheme, r.bundle_id))
         + ("" if r.camera_usage is None else camera.plist_lines(r.camera_usage))
         + ("" if r.bluetooth_usage is None else bluetooth.plist_lines(r.bluetooth_usage))
+        + ("" if r.speech_usage is None else speech.plist_lines(r.speech_usage))
     )
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -204,13 +205,21 @@ def main() -> int:
     universal = _lipo(r, r.bin, arch, r.name)
 
     app = _bundle(r, universal)
-    # The hardened runtime keeps the camera closed to an app without the
-    # entitlement. The bare binary gets it too, the updater puts it into the
-    # bundle.
+    # The hardened runtime keeps the camera and the microphone closed to an
+    # app without the entitlement. The bare binary gets it too, the updater
+    # puts it into the bundle.
+    keys = tuple(
+        key
+        for key, usage in (
+            (camera.ENTITLEMENT, r.camera_usage),
+            (speech.ENTITLEMENT, r.speech_usage),
+        )
+        if usage is not None
+    )
     entitlements = ""
-    if r.camera_usage is not None:
+    if keys:
         path = f"target/release/bundle/{r.name}.entitlements"
-        Path(path).write_text(camera.entitlements(), encoding="utf-8")
+        Path(path).write_text(camera.entitlements(keys), encoding="utf-8")
         entitlements = f' --entitlements "{path}"'
     if signing is not None:
         for target in (
