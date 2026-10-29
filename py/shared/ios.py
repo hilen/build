@@ -16,11 +16,12 @@ from shared.util import bail
 #
 # The rest is what the engine needs linked and a static library can't ask for by
 # itself: the video decode of ffmpeg, zlib for it, MediaPlayer for the lock
-# screen controls, and LocalAuthentication for Touch ID and Face ID.
+# screen controls, LocalAuthentication for Touch ID and Face ID, and the C++
+# library and CoreML for the static sherpa-onnx and onnxruntime of `speech`.
 LDFLAGS: Final = (
     "-Wl,-weak_framework,CoreGraphics -Wl,-weak_framework,Security "
     "-framework VideoToolbox -framework CoreMedia -framework CoreVideo -framework MediaPlayer "
-    "-framework LocalAuthentication -lz"
+    "-framework LocalAuthentication -framework CoreML -lz -lc++"
 )
 
 
