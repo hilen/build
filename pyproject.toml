@@ -58,11 +58,11 @@ suppress-none-returning = true
 
 [tool.ty.environment]
 python-version = "3.14"
-root = ["py", "py/tests"]
+root = ["py", "py/tests", "release"]
 
 [tool.ty.rules]
 all = "error"
 
 [tool.pytest.ini_options]
-pythonpath = ["py"]
+pythonpath = ["py", "release"]
 testpaths = ["py/tests"]

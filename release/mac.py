@@ -74,13 +74,14 @@ def _info_plist(r: Release) -> str:
 """
 
 
-def _bundle(r: Release, universal: str) -> str:
+def bundle(r: Release, universal: str) -> str:
     app = f"target/release/bundle/{r.name}.app"
     contents = Path(app) / "Contents"
     shutil.rmtree(app, ignore_errors=True)
     (contents / "MacOS").mkdir(parents=True)
     (contents / "Resources").mkdir(parents=True)
-    shutil.copyfile(universal, contents / "MacOS" / r.name)
+    # copyfile drops the exec bit, and such an app passes notarization and then does not start.
+    shutil.copy(universal, contents / "MacOS" / r.name)
     try:
         shutil.copyfile("assets/icon.icns", contents / "Resources" / "icon.icns")
     except OSError as err:
@@ -204,7 +205,7 @@ def main() -> int:
         run(f"cargo build --locked --release -p {r.name} --bin {r.bin} --target {target}")
     universal = _lipo(r, r.bin, arch, r.name)
 
-    app = _bundle(r, universal)
+    app = bundle(r, universal)
     # The hardened runtime keeps the camera and the microphone closed to an
     # app without the entitlement. The bare binary gets it too, the updater
     # puts it into the bundle.
