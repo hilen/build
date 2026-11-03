@@ -17,6 +17,7 @@ _RELEASE = Release(
     camera_usage=None,
     bluetooth_usage=None,
     speech_usage=None,
+    open_file_types=(),
 )
 
 _META = '{"size": 12, "sha256": "ab", "sig": "cd"}'

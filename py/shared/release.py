@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Final
 
 import msgspec
 
-from shared import bluetooth, camera, cargo, config, links, speech, toml
+from shared import bluetooth, camera, cargo, config, links, open_files, speech, toml
 from shared.run import run
 from shared.util import ScriptError, bail
 
@@ -70,6 +70,8 @@ class Release:
     bluetooth_usage: str | None
     # the text of the `[speech]` table, the packaging asks for the microphone
     speech_usage: str | None
+    # the file types of the `[open_files]` table, for Open With on a Mac
+    open_file_types: tuple[str, ...]
 
     # `kukareker-0.2.0-mac-universal.dmg` style names.
     def artifact(self, suffix: str) -> str:
@@ -165,4 +167,5 @@ def read() -> Release:
         camera_usage=camera.usage_of(text),
         bluetooth_usage=bluetooth.usage_of(text),
         speech_usage=speech.usage_of(text),
+        open_file_types=open_files.types_of(text),
     )

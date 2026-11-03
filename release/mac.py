@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Final
 from shared.run import capture, run, run_secret
 from shared.util import ScriptError, bail, run_main
 
-from shared import bluetooth, camera, inspect, links, release, speech
+from shared import bluetooth, camera, inspect, links, open_files, release, speech
 
 if TYPE_CHECKING:
     from shared.release import Release
@@ -53,6 +53,7 @@ def _info_plist(r: Release) -> str:
         + ("" if r.camera_usage is None else camera.plist_lines(r.camera_usage))
         + ("" if r.bluetooth_usage is None else bluetooth.plist_lines(r.bluetooth_usage))
         + ("" if r.speech_usage is None else speech.plist_lines(r.speech_usage))
+        + ("" if not r.open_file_types else open_files.plist_lines(r.open_file_types, r.name))
     )
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
