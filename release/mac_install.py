@@ -62,7 +62,11 @@ def main() -> int:
     shutil.copytree(app, target, symlinks=True)
     # The system also registers the bundle in target, and Open With then lists
     # the app twice.
-    subprocess.run([_LSREGISTER, "-u", app], check=True)
+    # A bundle the system did not register answers -10814, not found, and
+    # then there is nothing to take back.
+    unregistered = subprocess.run([_LSREGISTER, "-u", app], check=False)
+    if unregistered.returncode != 0:
+        print(f"lsregister had no {app} to take back, code {unregistered.returncode}")
     shutil.rmtree(app)
     subprocess.run([_LSREGISTER, "-f", str(target)], check=True)
     print(f"installed {target}")
