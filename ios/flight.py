@@ -5,6 +5,7 @@
 
 import os
 
+from shared.keychain import unlock_signing_keychain
 from shared.run import run
 from shared.util import run_main
 
@@ -25,6 +26,7 @@ def main() -> int:
     print(f"PROJECT_NAME: {app.project_name}")
     print(f"ARCHIVE_PATH: {archive_path}")
     print(f"IPA_PATH: {ipa_path}")
+    unlock_signing_keychain()
     print("codesign identity:")
     run("security find-identity -p codesigning -v")
 

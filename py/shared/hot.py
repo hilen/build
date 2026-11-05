@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Final, Self
 import msgspec
 
 from shared import tvos
+from shared.keychain import unlock_signing_keychain
 from shared.run import capture, probe, run, run_allow_fail, run_quiet
 from shared.util import ScriptError, bail
 
@@ -491,6 +492,7 @@ def inspect_tool(here: Path) -> Path:
 # The development certificate of this Mac, as the hash `codesign` takes. iOS
 # loads a library on a phone only with this signature.
 def sign_identity() -> str:
+    unlock_signing_keychain()
     lines = capture("security find-identity -v -p codesigning").splitlines()
     line = next((ln for ln in lines if "Apple Development" in ln), None)
     if line is None:
