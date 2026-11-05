@@ -58,6 +58,9 @@ _ENGINE_GIT: Final = "https://github.com/hilen/hilen.git"
 # built in, so the build leaves the repo of the app as it was.
 _KEPT_LOCK: Final = "target/hot-Cargo.lock"
 _STARTED_TRIES: Final = 240
+# sherpa-onnx of `speech` adds a load of SherpaOnnxC.framework, which the loader
+# lacks, and the loader could not open the app. No symbol comes from it.
+_LINK: Final = " -- -C link-arg=-Wl,-dead_strip_dylibs"
 # The running app has the newest library mapped and loads the next one before
 # it lets go, so 2 files are in use at most.
 _LIBRARIES_KEPT: Final = 3
@@ -266,7 +269,7 @@ class Hot:
             f"--features hilen/hot{features} {self._hot_flag()}{build_std}"
         )
         if self.engine is None:
-            line = f"{exports}; {cargo}"
+            line = f"{exports}; {cargo}{_LINK}"
         else:
             # The same relative path is right on the builder, far keeps the
             # folders as they lie here.
@@ -275,7 +278,7 @@ class Hot:
             # The new source of the engine changes the lock file.
             keep = f"mkdir -p target && cp Cargo.lock {_KEPT_LOCK}"
             restore = f"status=$?; cp {_KEPT_LOCK} Cargo.lock; exit $status"
-            line = f"{exports}; {keep} && {cargo} {patch}; {restore}"
+            line = f"{exports}; {keep} && {cargo} {patch}{_LINK}; {restore}"
         self._send_engine()
         run(self._on_builder(f"{self._prepare()} || exit 1; {line}"))
         library = f"target/{target}/release/lib{package.replace('-', '_')}.dylib"
