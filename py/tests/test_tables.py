@@ -1,3 +1,4 @@
+import os
 import subprocess
 
 import pytest
@@ -173,9 +174,9 @@ def test_the_job_line_never_holds_the_key():
 
 
 def _masked(cmd: str, key: str) -> subprocess.CompletedProcess[bytes]:
-    return subprocess.run(
-        ["bash", "-c", masked(cmd)], env={SESSION_KEY_ENV: key}, capture_output=True, check=False
-    )
+    # Bash with no PATH finds no awk on NixOS, where nothing is in /usr/bin.
+    env = {"PATH": os.environ["PATH"], SESSION_KEY_ENV: key}
+    return subprocess.run(["bash", "-c", masked(cmd)], env=env, capture_output=True, check=False)
 
 
 def test_the_mask_hides_the_key_and_keeps_the_exit_code():
