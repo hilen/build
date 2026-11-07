@@ -42,6 +42,12 @@ _THREAD_FLAGS: Final = (
     "-Clink-arg=--export=__tls_base -Clink-arg=--export=__heap_base "
     "-Clink-arg=--export=__data_end"
 )
+# V8 7.9 aborts a worker that waits in `memory.atomic.wait` when the wasm code
+# GC frees code on it, `MetadataLock` in `trap-handler/handler-shared.cc` under
+# `Runtime_WasmI32AtomicWait`. Liftoff code that tier up replaced is freed that
+# way about 1.5 s after the start. Only a dev package has such a worker, the
+# inspector, and in Chromium 79.0.3945.79 6 starts of 6 died, 0 of 5 with this.
+_DEV_V8_FLAGS: Final = "--no-wasm-code-gc"
 _RGB_HEX: Final = 6
 _RGBA_HEX: Final = 8
 # What a dev package dials at its start. `hilen-inspect web-bridge --tunnel`
@@ -236,7 +242,7 @@ def _splash(source: str, target: str, color: str):
         bail("no sips and no magick to make the splash, install ImageMagick")
 
 
-def _pack(app: Webos):
+def _pack(app: Webos, *, dev: bool):
     url = None if app.packaged else app.url
     if not app.packaged and url is None:
         bail(
@@ -262,7 +268,7 @@ def _pack(app: Webos):
         large_icon="largeIcon.png",
         disable_back_history_api=True,
         required_acg=(),
-        v8_extra_flags="--liftoff",
+        v8_extra_flags=f"--liftoff {_DEV_V8_FLAGS}" if dev else "--liftoff",
         splash_background="splash.png",
         icon_color=color,
     )
@@ -298,7 +304,7 @@ def main() -> int:
     if dist_only:
         print(f"the dist for the TV is in {app.crate_dir}/dist")
         return 0
-    _pack(app)
+    _pack(app, dev=dev)
     return 0
 
 
