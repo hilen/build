@@ -35,14 +35,15 @@ def main() -> int:
     # needed here as well as on the export. The archive signs too, and it runs
     # first, so a bundle id never built on this machine dies here with "No
     # profiles were found" long before the export can mint one.
-    run(
-        f'xcodebuild -project "{app.project_name}".xcodeproj -scheme "{app.project_name}" '
-        f'-sdk iphoneos -configuration Release archive -archivePath "{archive_path}" '
-        f'OTHER_LDFLAGS="{ios.LDFLAGS}" -allowProvisioningUpdates'
-    )
-    print("build: OK")
-    apple_upload.export(archive_path)
-    apple_upload.upload(ipa_path, "ios")
+    with apple_upload.api_key() as key:
+        run(
+            f'xcodebuild -project "{app.project_name}".xcodeproj -scheme "{app.project_name}" '
+            f'-sdk iphoneos -configuration Release archive -archivePath "{archive_path}" '
+            f'OTHER_LDFLAGS="{ios.LDFLAGS}" -allowProvisioningUpdates {key.xcodebuild_flags()}'
+        )
+        print("build: OK")
+        apple_upload.export(archive_path, key)
+        apple_upload.upload(ipa_path, "ios", key)
 
     # The tvOS build goes up after the iOS one. Its project step makes the mobile
     # folder again, which the iOS upload no longer needs by now.

@@ -31,8 +31,9 @@ def main() -> int:
         "CODE_SIGNING_ALLOWED=NO"
     )
     print("build: OK")
-    apple_upload.export(archive_path)
-    apple_upload.upload(ipa_path, "appletvos")
+    with apple_upload.api_key() as key:
+        apple_upload.export(archive_path, key)
+        apple_upload.upload(ipa_path, "appletvos", key)
     return 0
 
 
