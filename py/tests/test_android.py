@@ -1,5 +1,5 @@
 import pytest
-from shared.android import fix_gradle, fix_manifest, limit_targets, replace_once
+from shared.android import fix_gradle, fix_manifest, fix_root_gradle, limit_targets, replace_once
 from shared.util import ScriptError
 
 _GRADLE = """dependencies { implementation("androidx.games:games-activity:2.0.2") }
@@ -19,6 +19,13 @@ def test_the_gradle_fixes_go_in_once():
     assert "mergeReleaseJniLibFolders" in fixed
     assert 'assets.srcDir("../../../assets")' in fixed
     assert fix_gradle(fixed) == fixed
+
+
+def test_the_rust_plugin_has_no_pipes_import():
+    root = 'id("org.mozilla.rust-android-gradle.rust-android") version "0.9.4" apply false\n'
+    fixed = fix_root_gradle(root)
+    assert 'version "0.9.6"' in fixed
+    assert fix_root_gradle(fixed) == fixed
 
 
 def test_the_manifest_gets_the_permissions():

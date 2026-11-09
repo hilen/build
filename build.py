@@ -30,6 +30,7 @@ _STALE_JNI: Final = (
 
 def _fix_generated_project(app: Config):
     android.edit(android.GRADLE, android.fix_gradle)
+    android.edit(android.ROOT_GRADLE, android.fix_root_gradle)
     has_camera = camera.usage_of(toml.read_text()) is not None
     permission = camera.ANDROID_PERMISSION if has_camera else None
     android.edit(

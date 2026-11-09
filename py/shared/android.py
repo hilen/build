@@ -11,6 +11,7 @@ from shared.local_network import MULTICAST_PERMISSION
 from shared.util import bail
 
 GRADLE: Final = "mobile/android/app/build.gradle.kts"
+ROOT_GRADLE: Final = "mobile/android/build.gradle.kts"
 MANIFEST: Final = "mobile/android/app/src/main/AndroidManifest.xml"
 PROPERTIES: Final = "mobile/android/gradle.properties"
 _ALL_TARGETS: Final = 'targets = listOf("x86_64", "x86", "arm", "arm64")'
@@ -59,6 +60,17 @@ def fix_gradle(content: str) -> str:
         "        }"
     )
     return replace_once(GRADLE, content, jni_debug, with_assets)
+
+
+# The linker wrapper of rust-android-gradle 0.9.4 imports `pipes`, which Python
+# 3.13 removed, and uv puts its 3.14 first on the path of the build.
+def fix_root_gradle(content: str) -> str:
+    return replace_once(
+        ROOT_GRADLE,
+        content,
+        'rust-android") version "0.9.4"',
+        'rust-android") version "0.9.6"',
+    )
 
 
 # The lines the manifest needs before its <application>, each only when missing.

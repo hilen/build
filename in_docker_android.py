@@ -62,6 +62,11 @@ def main() -> int:
         # a warning here fails it like clippy fails desktop.
         "-e",
         "RUSTFLAGS=-D warnings",
+        # The venv of uv stays out of the bind mount. One made here as root in
+        # build/.venv points at a Python of the container, and the next uv run on
+        # the host fails to read it.
+        "-e",
+        "UV_PROJECT_ENVIRONMENT=/tmp/build-venv",
     ]
     abi = os.environ.get("HILEN_ANDROID_ABI", "")
     if abi:
