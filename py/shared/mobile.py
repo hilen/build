@@ -4,21 +4,49 @@
 import os
 import re
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Final
 
 from shared.run import has, run
 from shared.util import bail
+
+# The generator is built from main of its repo on every run, cargo builds it again
+# only when main moved. The crates.io copy and a hand built one went stale: on
+# 2026-11-09 both lacked the widget and Siri tables, and a fly shipped without them.
+_INSTALL: Final = (
+    "cargo install --git https://github.com/hilen/hilen-mobile --branch main --locked hilen-mobile"
+)
+# In the build folder of the app, on the builder and here.
+_FAR_ROOT: Final = "target/hilen-mobile"
+
+
+@dataclass(frozen=True, slots=True)
+class Generator:
+    steps: tuple[str, ...]
+    program: str
+
+
+def generator(*, cargo: bool) -> Generator:
+    if cargo:
+        return Generator(steps=(_INSTALL,), program="hilen-mobile")
+    # A machine with no Rust toolchain gets it built on a mac builder.
+    return Generator(
+        steps=(
+            f"far --on mac '{_INSTALL} --root {_FAR_ROOT}'",
+            f"far --on mac get {_FAR_ROOT}/bin/hilen-mobile",
+        ),
+        program=f"./{_FAR_ROOT}/bin/hilen-mobile",
+    )
 
 
 def generate(args: Sequence[str]):
     os.environ.pop("CFLAGS", None)
     os.environ.pop("CXXFLAGS", None)
-    if has("cargo"):
-        run("cargo install hilen-mobile --locked")
-    elif not has("hilen-mobile"):
-        # A machine with no Rust toolchain gets the generator ready built.
-        bail("hilen-mobile is not installed and this machine has no cargo to install it")
-    run(f"hilen-mobile {' '.join(args)}".strip())
+    found = generator(cargo=has("cargo"))
+    for step in found.steps:
+        run(step)
+    run(f"{found.program} {' '.join(args)}".strip())
 
 
 # The template of the generator has its own deployment target. The minimum of the
