@@ -29,6 +29,7 @@
 
 import os
 import re
+import socket
 import subprocess
 import sys
 import time
@@ -49,6 +50,8 @@ _DEVICE_TYPE: Final = "com.apple.CoreSimulator.SimDeviceType.iPhone-8"
 _RUNTIME: Final = "com.apple.CoreSimulator.SimRuntime.iOS-16-4"
 _RUNTIME_HINT: Final = "iOS 16.4"
 _SHUTDOWN_WAIT_SECONDS: Final = 60
+# xcodebuild builds nothing here, it only starts the runner of the helper.
+_HELPER_START_SECONDS: Final = 180
 
 # The XCUITest of the mobile project that taps the screen and the keys of the
 # screen keyboard for a test, see `system_input` in the engine. It listens on
@@ -193,8 +196,11 @@ def _launch_line(lane: _Lane, device: str) -> str:
     if lane.human:
         env.append("SIMCTL_CHILD_HILEN_HUMAN=1")
     env.append(f"SIMCTL_CHILD_HILEN_SYSTEM_INPUT=127.0.0.1:{lane.port}")
+    # With --console simctl at times stopped reading the stdout pipe of the app.
+    # The failure details of a full run fill it, `println!` then blocked in the
+    # write and the app never exited, seen on 2026-11-07. A pty is drained.
     return (
-        f"{' '.join(env)} xcrun simctl launch --console --terminate-running-process {device} "
+        f"{' '.join(env)} xcrun simctl launch --console-pty --terminate-running-process {device} "
         f"{lane.app.bundle_id}"
     )
 
@@ -209,6 +215,23 @@ def _restore_keyboard(saved: str):
         # It was never set, which reads as an error text.
         case _:
             run_quiet(f"defaults delete {_HARDWARE_KEYBOARD}")
+
+
+# The runner of the helper is an app too, and the one that comes up last is in
+# front. When it came up after the app, the whole suite ran in the background,
+# with no screen keyboard and under the privacy cover, seen on 2026-11-07. So
+# the app starts only once the helper serves.
+def _wait_for_helper(port: int, helper: subprocess.Popen[bytes]):
+    for _ in range(_HELPER_START_SECONDS):
+        if helper.poll() is not None:
+            log = f"{_IOS_TARGET_DIR}/system-input.log"
+            bail(f"the system input helper ended before it served, see {log}")
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=1):
+                return
+        except OSError:
+            time.sleep(1)
+    bail(f"the system input helper did not serve on port {port} in {_HELPER_START_SECONDS} seconds")
 
 
 def _run_suite(lane: _Lane, device: str, app_path: str) -> str:
@@ -246,6 +269,7 @@ def _run_suite(lane: _Lane, device: str, app_path: str) -> str:
             ),
         ]
     )
+    _wait_for_helper(lane.port, helper)
     launch = _launch_line(lane, device)
     # Under make ui 3 lanes run at once, so this lane stays quiet. On its own it
     # streams every test live. A human run always streams, it holds for the user
