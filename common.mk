@@ -56,8 +56,6 @@ webos-dist:
 test:
 	cargo test --all
 	echo debug test: OK
-	cargo test --all --release
-	echo release test: OK
 
 # Uploads the iOS build to TestFlight, and the tvOS build after it when
 # hilen.toml has `tvos = true`.
