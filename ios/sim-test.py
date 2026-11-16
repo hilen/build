@@ -8,10 +8,12 @@
 # the simulator renders on the host GPU, so an even older chip would prove
 # nothing the render pipeline does not already show here.
 #
-# The app is x86_64 only for the simulator. The project excludes arm64 there, so
-# it runs under Rosetta, and building the scheme instead falls back to Mac
-# Catalyst arm64 and fails to link. So this builds the target against the
-# iphonesimulator SDK directly with ARCHS=x86_64.
+# The simulator app is native arm64, so no Rosetta is needed. The project of
+# hilen-mobile excludes arm64 from a simulator build, because the universal lib of
+# build-lib.py gives its only arm64 slice to the phone. This lane builds its own
+# lib for aarch64-apple-ios-sim and lifts that exclusion on the xcodebuild line.
+# Building the scheme instead falls back to Mac Catalyst and fails to link, so
+# this builds the target against the iphonesimulator SDK directly.
 #
 # Tests start through HILEN_RUN_TESTS, not the inspector. The app runs the suite
 # on a worker task, prints a result marker and exits, so there is no mDNS to tell
@@ -29,6 +31,7 @@
 
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -59,6 +62,12 @@ _HELPER_START_SECONDS: Final = 180
 _SYSTEM_INPUT_SCHEME: Final = "SystemInput"
 _SYSTEM_INPUT_PORT: Final = 47815
 _HARDWARE_KEYBOARD: Final = "com.apple.iphonesimulator ConnectHardwareKeyboard"
+# A fresh device covers the keyboard of its first use with a card about typing
+# by sliding a finger, and the keys under it take no tap. Every far job and CI
+# run makes a fresh device. The key is the one the TextInput framework reads.
+_SLIDE_TYPING_SEEN: Final = (
+    "defaults write com.apple.keyboard.preferences DidShowContinuousPathIntroduction -bool true"
+)
 
 # far runs this lane on a build machine that many sessions share, see far.md in
 # the comb repo. It gives each job an id and 100 ports of its own. With 1 device
@@ -73,7 +82,13 @@ _FAR_PORT: Final = "FAR_PORT"
 _IOS_TARGET_DIR: Final = "target/ios"
 _HELPER_LOG: Final = f"{_IOS_TARGET_DIR}/system-input.log"
 _HELPER_LOG_LINES: Final = 40
-_SIM_TRIPLE: Final = "x86_64-apple-ios"
+_FAILURES_DIR: Final = f"{_IOS_TARGET_DIR}/failures"
+_FAILURE_PICTURES: Final = "ui_test_*.png"
+_SIM_TRIPLE: Final = "aarch64-apple-ios-sim"
+# No arm64 simulator is older than iOS 14.
+_SIM_MINIMUM: Final = "14.0"
+# Lifts the arm64 exclusion of the generated project, see the top of this file.
+_SIM_ARCH: Final = "ARCHS=arm64 EXCLUDED_ARCHS="
 _NSLOG_PREFIX: Final = re.compile(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+ \S+\[\d+:\d+\] ")
 _RESULT: Final = re.compile(r"HILEN_TEST_RESULT (\d+) tests, (\d+) failed")
 _DEVICE_ID: Final = re.compile(r"\(([0-9A-F-]{36})\)")
@@ -133,7 +148,7 @@ def _build_lib(lane: _Lane):
         run_quiet(f"rustup target add {_SIM_TRIPLE}")
     _step("building the engine for iOS, this takes a while")
     build = (
-        f"env CARGO_TARGET_DIR={_IOS_TARGET_DIR} IPHONEOS_DEPLOYMENT_TARGET=12.0 "
+        f"env CARGO_TARGET_DIR={_IOS_TARGET_DIR} IPHONEOS_DEPLOYMENT_TARGET={_SIM_MINIMUM} "
         f"cargo build -p {lane.app.app_name} --lib --target {_SIM_TRIPLE} --release"
     )
     if local:
@@ -157,8 +172,9 @@ def _build_app(lane: _Lane) -> str:
     _step("building the simulator app")
     run_quiet(
         f"xcodebuild -project {lane.xcodeproj()} -target {lane.app.project_name} "
-        "-configuration Release -sdk iphonesimulator ARCHS=x86_64 VALID_ARCHS=x86_64 "
-        f'ONLY_ACTIVE_ARCH=NO SYMROOT={symroot} OTHER_LDFLAGS="{ios.LDFLAGS}" build'
+        f"-configuration Release -sdk iphonesimulator {_SIM_ARCH} "
+        f"IPHONEOS_DEPLOYMENT_TARGET={_SIM_MINIMUM} ONLY_ACTIVE_ARCH=NO SYMROOT={symroot} "
+        f'OTHER_LDFLAGS="{ios.LDFLAGS}" build'
     )
     return f"{symroot}/Release-iphonesimulator/{lane.app.project_name}.app"
 
@@ -238,6 +254,21 @@ def _wait_for_helper(port: int, helper: subprocess.Popen[bytes]):
     bail(f"the system input helper did not serve on port {port} in {_HELPER_START_SECONDS} seconds")
 
 
+# A failed test leaves its picture in the tmp folder of the app, and the device of
+# a far job or a CI runner is deleted with it after the run.
+def _save_failure_pictures(lane: _Lane, device: str):
+    data = probe(f"xcrun simctl get_app_container {device} {lane.app.bundle_id} data").strip()
+    pictures = sorted(Path(data, "tmp").glob(_FAILURE_PICTURES)) if data else []
+    if not pictures:
+        return
+    saved = Path(_FAILURES_DIR)
+    shutil.rmtree(saved, ignore_errors=True)
+    saved.mkdir(parents=True)
+    for picture in pictures:
+        shutil.copy(picture, saved / picture.name)
+    eprint(f"[ios] {len(pictures)} failure pictures are in {saved}")
+
+
 # A CI VM is deleted after its job, its log of the helper with it.
 def _print_helper_log():
     try:
@@ -253,7 +284,8 @@ def _run_suite(lane: _Lane, device: str, app_path: str) -> str:
     helper_data = f"{Path.cwd()}/{_IOS_TARGET_DIR}/system-input"
     helper_build = (
         f"-project {lane.xcodeproj()} -scheme {_SYSTEM_INPUT_SCHEME} "
-        f'-destination "platform=iOS Simulator,id={device}" -derivedDataPath {helper_data}'
+        f'-destination "platform=iOS Simulator,id={device}" -derivedDataPath {helper_data} '
+        f"{_SIM_ARCH}"
     )
     _step("building the system input helper")
     run_quiet(f"xcodebuild build-for-testing {helper_build}")
@@ -265,6 +297,7 @@ def _run_suite(lane: _Lane, device: str, app_path: str) -> str:
         run_quiet(f"defaults write {_HARDWARE_KEYBOARD} -bool false")
     _step(f"booting {lane.device_name}")
     _boot_device(device, lane.device_name)
+    run_quiet(f"xcrun simctl spawn {device} {_SLIDE_TYPING_SEEN}")
     if lane.desktop:
         # By its path, Launch Services knows no Simulator by name in a copied
         # Xcode that was never opened, like the one in the CI VM image.
@@ -296,6 +329,7 @@ def _run_suite(lane: _Lane, device: str, app_path: str) -> str:
     helper.kill()
     helper.wait()
 
+    _save_failure_pictures(lane, device)
     run_quiet(f"xcrun simctl shutdown {device} || true")
     if lane.desktop:
         probe("osascript -e 'tell application \"Simulator\" to quit'")
