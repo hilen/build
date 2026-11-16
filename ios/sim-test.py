@@ -252,7 +252,9 @@ def _run_suite(lane: _Lane, device: str, app_path: str) -> str:
     _step(f"booting {lane.device_name}")
     _boot_device(device, lane.device_name)
     if lane.desktop:
-        run_quiet("open -a Simulator")
+        # By its path, Launch Services knows no Simulator by name in a copied
+        # Xcode that was never opened, like the one in the CI VM image.
+        run_quiet('open "$(xcode-select -p)/Applications/Simulator.app"')
     run_quiet(f'xcrun simctl install {device} "{app_path}"')
 
     # HILEN_RUN_TESTS makes the app run the suite and exit. --console streams its
