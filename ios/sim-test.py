@@ -345,9 +345,15 @@ def _run_suite(lane: _Lane, device: str, app_path: str) -> str:
 # runner that started at boot with nobody logged in get Background, and there
 # `open -a Simulator` fails with `Unable to find application named 'Simulator'`.
 _DESKTOP_SESSION: Final = "Aqua"
+# Runs the lane with no Simulator app in a desktop session too, the way a far job
+# on kotik runs it. On a GitHub mac the runner of the helper hung for 480 s with
+# the desktop path, the cause is not known.
+_NO_DESKTOP: Final = "HILEN_IOS_NO_DESKTOP"
 
 
 def _has_desktop() -> bool:
+    if _NO_DESKTOP in os.environ:
+        return False
     return probe("launchctl managername").strip() == _DESKTOP_SESSION
 
 
@@ -367,6 +373,9 @@ def main() -> int:
     )
     if lane.present and "HILEN_TEST_ONLY" not in os.environ:
         bail("[ios] --present needs HILEN_TEST_ONLY naming exactly one test")
+    _step(
+        "the Simulator app opens" if lane.desktop else "no Simulator app, the device has no window"
+    )
     _build_lib(lane)
     app_path = _build_app(lane)
     device = _ensure_device(lane.device_name)
