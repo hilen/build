@@ -75,7 +75,7 @@ def _build_android(app: Config):
 def _install_linux_deps(release: str, uname: str) -> int:
     if "amazon" in release:
         print("Amazon")
-        run("sudo yum install -y gcc gcc-c++ alsa-lib-devel")
+        run("sudo yum install -y gcc gcc-c++ alsa-lib-devel dbus-devel pkgconf-pkg-config")
     elif "fedora" in release:
         print("Fedora")
         run(

@@ -86,8 +86,9 @@ class _Lane:
     app: Config
     device_name: str
     port: int
-    # A far job has no desktop session, so there is no Simulator app to open and
-    # no hardware keyboard to take away. The device runs without a window.
+    # A far job or a CI runner has no desktop session, so there is no Simulator
+    # app to open and no hardware keyboard to take away. The device runs without
+    # a window.
     desktop: bool
     # The simulator spelling of the desktop `--human`. The app holds after every
     # check and every test until a tap on the screen.
@@ -290,6 +291,16 @@ def _run_suite(lane: _Lane, device: str, app_path: str) -> str:
     return output
 
 
+# launchd names the session of a logged in desktop Aqua. A far job and a CI
+# runner that started at boot with nobody logged in get Background, and there
+# `open -a Simulator` fails with `Unable to find application named 'Simulator'`.
+_DESKTOP_SESSION: Final = "Aqua"
+
+
+def _has_desktop() -> bool:
+    return probe("launchctl managername").strip() == _DESKTOP_SESSION
+
+
 def main() -> int:
     if sys.platform != "darwin":
         print("[ios] not macOS, skipping the iOS simulator lane.")
@@ -300,7 +311,7 @@ def main() -> int:
         app=config.read(),
         device_name=_DEVICE_NAME if job is None else f"{_DEVICE_NAME}-{job}",
         port=int(os.environ.get(_FAR_PORT, str(_SYSTEM_INPUT_PORT))),
-        desktop=job is None,
+        desktop=_has_desktop(),
         human="--human" in args,
         present="--present" in args,
     )

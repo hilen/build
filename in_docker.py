@@ -38,6 +38,9 @@ elif command -v zypper > /dev/null; then
     zypper install -y curl tar sudo git
 fi
 git config --global --add safe.directory '*'
+# A venv made here links to the Python of root in the container. Left in the
+# mounted folder, it stops every later uv run on the host with Permission denied.
+export UV_PROJECT_ENVIRONMENT=/opt/build-venv
 curl -LsSf https://astral.sh/uv/{_UV_VERSION}/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
 {build_command}
 """
