@@ -392,6 +392,10 @@ function launchChrome(url: string) {
                       "--use-vulkan=swiftshader",
                       "--use-webgpu-adapter=swiftshader",
                       "--disable-vulkan-surface",
+                      // The CI runner unit on the bees blocks setuid programs
+                      // and user namespaces, so Chrome finds no sandbox it can
+                      // use and aborts. The page it opens is our own build.
+                      "--no-sandbox",
                   ]
                 : []),
             `--window-size=760,${WINDOW_HEIGHT}`,

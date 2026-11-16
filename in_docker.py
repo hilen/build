@@ -26,7 +26,9 @@ if command -v apt > /dev/null; then
     apt update
     apt install -y curl tar sudo git
 elif command -v pacman > /dev/null; then
-    pacman -Sy curl tar sudo git --noconfirm
+    # A sync with no upgrade is a partial upgrade, which Arch does not support.
+    # A new openssl then broke pacman itself, which still wanted libcrypto 3.
+    pacman -Syu curl tar sudo git --noconfirm
 elif command -v dnf > /dev/null; then
     dnf install -y tar sudo git
     if ! command -v curl > /dev/null; then
