@@ -53,8 +53,9 @@ _DEVICE_TYPE: Final = "com.apple.CoreSimulator.SimDeviceType.iPhone-8"
 _RUNTIME: Final = "com.apple.CoreSimulator.SimRuntime.iOS-16-4"
 _RUNTIME_HINT: Final = "iOS 16.4"
 _SHUTDOWN_WAIT_SECONDS: Final = 60
-# xcodebuild builds nothing here, it only starts the runner of the helper.
-_HELPER_START_SECONDS: Final = 180
+# xcodebuild builds nothing here, it only starts the runner of the helper. A
+# GitHub mac with a runtime added in the same job did not get it serving in 180 s.
+_HELPER_START_SECONDS: Final = 600
 
 # The XCUITest of the mobile project that taps the screen and the keys of the
 # screen keyboard for a test, see `system_input` in the engine. It listens on
