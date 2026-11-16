@@ -71,6 +71,8 @@ _FAR_PORT: Final = "FAR_PORT"
 # of the desktop lane, which lets the 2 lanes truly run side by side. It sits
 # under target, so the ignore of target already covers it.
 _IOS_TARGET_DIR: Final = "target/ios"
+_HELPER_LOG: Final = f"{_IOS_TARGET_DIR}/system-input.log"
+_HELPER_LOG_LINES: Final = 40
 _SIM_TRIPLE: Final = "x86_64-apple-ios"
 _NSLOG_PREFIX: Final = re.compile(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+ \S+\[\d+:\d+\] ")
 _RESULT: Final = re.compile(r"HILEN_TEST_RESULT (\d+) tests, (\d+) failed")
@@ -225,14 +227,26 @@ def _restore_keyboard(saved: str):
 def _wait_for_helper(port: int, helper: subprocess.Popen[bytes]):
     for _ in range(_HELPER_START_SECONDS):
         if helper.poll() is not None:
-            log = f"{_IOS_TARGET_DIR}/system-input.log"
-            bail(f"the system input helper ended before it served, see {log}")
+            _print_helper_log()
+            bail(f"the system input helper ended before it served, see {_HELPER_LOG}")
         try:
             with socket.create_connection(("127.0.0.1", port), timeout=1):
                 return
         except OSError:
             time.sleep(1)
+    _print_helper_log()
     bail(f"the system input helper did not serve on port {port} in {_HELPER_START_SECONDS} seconds")
+
+
+# A CI VM is deleted after its job, its log of the helper with it.
+def _print_helper_log():
+    try:
+        lines = Path(_HELPER_LOG).read_text(errors="replace").split("\n")
+    except OSError as error:
+        eprint(f"[ios] no log of the system input helper: {error}")
+        return
+    eprint(f"[ios] the last lines of {_HELPER_LOG}:")
+    eprint("\n".join(lines[-_HELPER_LOG_LINES:]))
 
 
 def _run_suite(lane: _Lane, device: str, app_path: str) -> str:
@@ -260,7 +274,6 @@ def _run_suite(lane: _Lane, device: str, app_path: str) -> str:
     # HILEN_RUN_TESTS makes the app run the suite and exit. --console streams its
     # stdout here, so the result marker arrives before the launch returns.
     _step("running the UI suite on the simulator")
-    helper_log = f"{_IOS_TARGET_DIR}/system-input.log"
     helper = subprocess.Popen(
         [
             "sh",
@@ -268,7 +281,7 @@ def _run_suite(lane: _Lane, device: str, app_path: str) -> str:
             (
                 f"TEST_RUNNER_HILEN_BUNDLE_ID={lane.app.bundle_id} "
                 f"TEST_RUNNER_HILEN_SYSTEM_INPUT_PORT={lane.port} exec "
-                f"xcodebuild test-without-building {helper_build} > {helper_log} 2>&1"
+                f"xcodebuild test-without-building {helper_build} > {_HELPER_LOG} 2>&1"
             ),
         ]
     )
