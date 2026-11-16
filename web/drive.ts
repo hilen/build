@@ -396,6 +396,9 @@ function launchChrome(url: string) {
                       // and user namespaces, so Chrome finds no sandbox it can
                       // use and aborts. The page it opens is our own build.
                       "--no-sandbox",
+                      // Its zygote then still failed to fork any child there,
+                      // "Zygote could not fork ... child_pid -1".
+                      "--no-zygote",
                   ]
                 : []),
             `--window-size=760,${WINDOW_HEIGHT}`,
