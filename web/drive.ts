@@ -4,7 +4,7 @@
 // with no automation protocol. See docs/ui-tests.md and docs/inspect.md.
 //
 //   bun build/web/drive.ts [--browser firefox|chrome|none] [--only "Name,Name"]
-//                          [--port 44810] [--timeout 900] [--stall 180] [--no-build]
+//                          [--port 44810] [--timeout 2400] [--stall 180] [--no-build]
 //                          [--human] [--present --only "Name"]
 
 import { parseArgs } from "node:util";
@@ -17,7 +17,9 @@ const { values: args } = parseArgs({
         browser: { type: "string", default: "chrome" },
         only: { type: "string" },
         port: { type: "string", default: "44810" },
-        timeout: { type: "string", default: "900" },
+        // The whole suite. A slow CI node got to test 400 of 441 in 900 s,
+        // a test that hangs is caught sooner by the stall watchdog.
+        timeout: { type: "string", default: "2400" },
         stall: { type: "string", default: "180" },
         "no-build": { type: "boolean", default: false },
         human: { type: "boolean", default: false },

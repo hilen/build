@@ -341,10 +341,14 @@ def main() -> int:
     found = _RESULT.search(output)
     if found is None:
         eprint(output)
+        _print_helper_log()
         bail("[ios] sim run produced no result marker. See the launch output above.")
     total, failed = int(found[1]), int(found[2])
     if failed != 0:
         eprint(output)
+        # A test that waits on a tap or a key of the helper names no cause
+        # itself, the helper log does.
+        _print_helper_log()
         _step(f"FAILED: {total} tests, {failed} failed")
         return 1
     _step(f"ok: {total} tests, 0 failed")
