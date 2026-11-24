@@ -33,6 +33,13 @@ device:
 swap:
 	uv run -q --no-dev ./build/ios/swap.py $(args)
 
+# 1 app in the iOS simulator of this Mac, driven with real touches and the real
+# screen keyboard, 1 command per step: make sim args="start", then
+# args="tap 100 200", args="type hello", args="shot", args="stop". The window
+# stays open to watch. See ios-debug.md of the hilen skill.
+sim:
+	uv run -q --no-dev ./build/ios/sim.py $(args)
+
 android:
 	uv run -q --no-dev ./build/build.py android
 
