@@ -54,11 +54,21 @@ _RGBA_HEX: Final = 8
 # carries this port of the TV to the Mac, the TV can't open a connection to the
 # Mac itself. The same port as `PAGE_PORT` of hilen.
 _INSPECT_URL: Final = "ws://127.0.0.1:7436/hilen-inspect"
+# Fixes for the browser of the TV. They run before the app script, so they are
+# the first in head.
+#
 # Chromium 79 of webOS lists WEBGL_compressed_texture_astc, but its object has no
 # getSupportedProfiles, which came later. wgpu calls it to choose the ASTC
 # features and the throw stops the app. An extension without the call is LDR
-# only. It runs before the app script, so it is the first in head.
-_ASTC_PROFILES: Final = """<script>
+# only.
+#
+# webOS 6 drops a queueMicrotask callback queued while the app is hidden, like
+# after Home during the start. It never runs, also after the app shows again.
+# The task queue of wasm-bindgen waits for that 1 callback before it queues
+# another, so no Rust task runs again and the app hangs with no window. A
+# Promise.then callback runs while hidden. Seen 4 of 4 times on the LG C1 on
+# 2026-11-26, and 0 of 2 with this fix.
+_TV_FIXES: Final = """<script>
 (function () {
     var getExtension = WebGL2RenderingContext.prototype.getExtension;
     WebGL2RenderingContext.prototype.getExtension = function (name) {
@@ -70,6 +80,9 @@ _ASTC_PROFILES: Final = """<script>
             };
         }
         return extension;
+    };
+    window.queueMicrotask = function (callback) {
+        Promise.resolve().then(callback);
     };
 })();
 </script>"""
@@ -183,8 +196,8 @@ def _fix_start_script(app: Webos):
     if "await init(" in fixed:
         bail(f"the start script of {path} still has a top level await")
     if fixed.count("<head>") != 1:
-        bail(f"{path} needs exactly 1 <head> for the ASTC script")
-    path.write_text(fixed.replace("<head>", f"<head>\n{_ASTC_PROFILES}"), encoding="utf-8")
+        bail(f"{path} needs exactly 1 <head> for the TV fixes")
+    path.write_text(fixed.replace("<head>", f"<head>\n{_TV_FIXES}"), encoding="utf-8")
     print(f"start script of {path} rewritten for Chromium 79")
 
 
